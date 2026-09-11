@@ -3,6 +3,8 @@ package io.omarchy.omasend.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.QrCode
@@ -134,6 +137,7 @@ fun RadarScreen(
     var selectedPeer by remember { mutableStateOf<DiscoveredPeer?>(null) }
     var transferState by remember { mutableStateOf<TransferProgressState>(TransferProgressState.Idle) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showInfoDialog by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
     var showDirectIpDialog by remember { mutableStateOf(false) }
 
@@ -175,19 +179,27 @@ fun RadarScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.clickable { showInfoDialog = true }
                         ) {
                             Text(
-                                text = "AirBridge",
+                                text = "v1.0.3",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showInfoDialog = true }) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "Hakkında & Sürüm Bilgisi",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = { showQrDialog = true }) {
                         Icon(
                             Icons.Default.QrCode,
@@ -619,7 +631,7 @@ fun RadarScreen(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 title = {
                     Text(
-                        text = "Device Settings",
+                        text = "Cihaz Ayarları",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -628,7 +640,7 @@ fun RadarScreen(
                 text = {
                     Column {
                         Text(
-                            text = "Device Name (visible to nearby peers):",
+                            text = "Cihaz Adı (Ağda ve radarda görünen isim):",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -640,6 +652,19 @@ fun RadarScreen(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                showSettingsDialog = false
+                                showInfoDialog = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Uygulama Bilgisi & Sürüm (v1.0.3)")
+                        }
                     }
                 },
                 confirmButton = {
@@ -650,14 +675,22 @@ fun RadarScreen(
                         },
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Save")
+                        Text("Kaydet")
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showSettingsDialog = false }) {
-                        Text("Cancel")
+                        Text("Vazgeç")
                     }
                 }
+            )
+        }
+
+        // Info / About Dialog
+        if (showInfoDialog) {
+            InfoDialog(
+                context = context,
+                onDismiss = { showInfoDialog = false }
             )
         }
 
@@ -1952,4 +1985,144 @@ fun DirectIpDialog(
         }
     )
 }
+
+@Composable
+fun InfoDialog(
+    context: Context,
+    onDismiss: () -> Unit
+) {
+    val packageInfo = remember(context) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val versionName = packageInfo?.versionName ?: "1.0.3"
+    val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        packageInfo?.longVersionCode ?: 4L
+    } else {
+        @Suppress("DEPRECATION")
+        packageInfo?.versionCode?.toLong() ?: 4L
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        icon = {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        },
+        title = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "OmaSend Mobile",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Omarchy AirBridge P2P Ecosystem",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedCard(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        InfoRow(label = "Yüklü Sürüm", value = "v$versionName (Derleme: $versionCode)", highlight = true)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        InfoRow(label = "Protokol", value = "Omarchy P2P v1.0")
+                        Spacer(modifier = Modifier.height(10.dp))
+                        InfoRow(label = "Port & Ağ", value = "53317 / UDP & TCP")
+                        Spacer(modifier = Modifier.height(10.dp))
+                        InfoRow(label = "Şifreleme", value = "AES-256-GCM / TLS E2EE")
+                        Spacer(modifier = Modifier.height(10.dp))
+                        InfoRow(label = "Geliştirici", value = "Ozan Özdil (Omarchy Linux)")
+                        Spacer(modifier = Modifier.height(10.dp))
+                        InfoRow(label = "Lisans", value = "GPL-3.0 (Açık Kaynak)")
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "OmaSend, yerel ağda internete ihtiyaç duymadan cihazlar arasında yüksek hızlı dosya ve pano aktarımı sağlayan güvenli bir Omarchy uygulamasıdır.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Tamam")
+            }
+        }
+    )
+}
+
+@Composable
+fun InfoRow(label: String, value: String, highlight: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (highlight) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Text(
+                    text = value,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        } else {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
 
