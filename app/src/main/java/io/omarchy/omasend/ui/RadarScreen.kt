@@ -170,11 +170,10 @@ fun RadarScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             shape = CircleShape,
@@ -186,7 +185,7 @@ fun RadarScreen(
                                     Icons.Default.Send,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -203,7 +202,7 @@ fun RadarScreen(
                             color = if (discoveryMode != DiscoveryMode.OFF) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
@@ -212,12 +211,14 @@ fun RadarScreen(
                                         .clip(CircleShape)
                                         .background(if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981) else Color.Gray)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = if (discoveryMode != DiscoveryMode.OFF) "Çevrimiçi" else "Duraklatıldı",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (discoveryMode != DiscoveryMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (discoveryMode != DiscoveryMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -237,38 +238,51 @@ fun RadarScreen(
                                 isRefreshing = false
                                 Toast.makeText(context, "Ağ ve Bluetooth eşleri güncellendi", Toast.LENGTH_SHORT).show()
                             }
-                        }
+                        },
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "Yenile",
-                            modifier = Modifier.rotate(refreshRotation.value),
+                            modifier = Modifier.rotate(refreshRotation.value).size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { showQrDialog = true }) {
+                    IconButton(
+                        onClick = { showQrDialog = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             Icons.Default.QrCode,
                             contentDescription = "Web QR Paylaşım",
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { showDirectIpDialog = true }) {
+                    IconButton(
+                        onClick = { showDirectIpDialog = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             Icons.Default.AddLink,
                             contentDescription = "Doğrudan IP Ekle",
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { showInfoDialog = true }) {
+                    IconButton(
+                        onClick = { showInfoDialog = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             Icons.Default.Info,
                             contentDescription = "Bilgi",
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
@@ -588,8 +602,14 @@ fun LocalDeviceHeroCard(
 
             // Visibility Segmented Options
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 listOf(
                     Triple(DiscoveryMode.EVERYONE, "Herkes", Icons.Default.Public),
@@ -597,30 +617,38 @@ fun LocalDeviceHeroCard(
                     Triple(DiscoveryMode.OFF, "Kapalı", Icons.Default.Lock)
                 ).forEach { (mode, label, icon) ->
                     val isSelected = currentMode == mode
-                    FilterChip(
-                        selected = isSelected,
+                    Surface(
                         onClick = { onModeSelected(mode) },
-                        label = {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        leadingIcon = {
+                        shape = RoundedCornerShape(9.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Icon(
                                 icon,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp),
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -656,13 +684,13 @@ fun QuickSendHubCard(
                 onClick = onPickFiles
             )
             QuickActionItem(
-                title = "Galeri / Medya",
+                title = "Galeri",
                 icon = Icons.Default.Image,
                 modifier = Modifier.weight(1f),
                 onClick = onPickMedia
             )
             QuickActionItem(
-                title = "Pano Paylaş",
+                title = "Pano",
                 icon = Icons.Default.ContentCopy,
                 modifier = Modifier.weight(1f),
                 onClick = onSendClipboard

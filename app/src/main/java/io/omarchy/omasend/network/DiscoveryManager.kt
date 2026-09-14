@@ -3,6 +3,7 @@ package io.omarchy.omasend.network
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothClass
 import android.os.Build
 import android.Manifest
 import android.content.pm.PackageManager
@@ -262,12 +263,26 @@ class DiscoveryManager(private val context: Context) {
             for (device in bonded) {
                 val name = device.name ?: "Paired Device"
                 val lowerName = name.lowercase()
-                // Filter out non-file-transfer accessories
+                // 1. Device Class Check: Filter out audio/video (headphones, car, speakers), peripherals, wearables
+                val majorClass = try { device.bluetoothClass?.majorDeviceClass } catch (_: Exception) { null }
+                if (majorClass == BluetoothClass.Device.Major.AUDIO_VIDEO ||
+                    majorClass == BluetoothClass.Device.Major.PERIPHERAL ||
+                    majorClass == BluetoothClass.Device.Major.WEARABLE ||
+                    majorClass == BluetoothClass.Device.Major.HEALTH
+                ) {
+                    continue
+                }
+
+                // 2. Keyword Filter: Exclude accessories, cars, audio devices
                 if (lowerName.contains("controller") || lowerName.contains("gamepad") ||
                     lowerName.contains("mouse") || lowerName.contains("keyboard") ||
                     lowerName.contains("headset") || lowerName.contains("headphones") ||
                     lowerName.contains("earbuds") || lowerName.contains("airpods") ||
-                    lowerName.contains("watch") || lowerName.contains("speaker")
+                    lowerName.contains("watch") || lowerName.contains("speaker") ||
+                    lowerName.contains("beats") || lowerName.contains("buds") ||
+                    lowerName.contains("sound") || lowerName.contains("audio") ||
+                    lowerName.contains("tws") || lowerName.contains("renault") ||
+                    lowerName.contains("car") || lowerName.contains("auto")
                 ) {
                     continue
                 }
