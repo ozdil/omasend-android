@@ -1653,7 +1653,7 @@ suspend fun sendFileUriToPeer(
             if (peer.transport == "BT" || peer.ip.startsWith("bt:")) {
                 withContext(Dispatchers.Main) {
                     onState(TransferProgressState.Idle)
-                    TransferBridge.sendViaBluetooth(context, listOf(uri))
+                    TransferBridge.sendViaBluetooth(context, listOf(uri), targetMac = peer.fingerprint.ifEmpty { peer.ip })
                 }
                 return@withContext
             }
@@ -1670,7 +1670,7 @@ suspend fun sendFileUriToPeer(
                     withContext(Dispatchers.Main) {
                         onState(TransferProgressState.Idle)
                         Toast.makeText(context, "Wi-Fi bağlantısı kurulamadı. Bluetooth ile aktarılıyor...", Toast.LENGTH_LONG).show()
-                        TransferBridge.sendViaBluetooth(context, listOf(uri))
+                        TransferBridge.sendViaBluetooth(context, listOf(uri), targetMac = peer.fingerprint.ifEmpty { peer.ip })
                     }
                     return@withContext
                 }

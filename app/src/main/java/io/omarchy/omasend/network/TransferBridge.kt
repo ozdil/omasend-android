@@ -91,11 +91,16 @@ object TransferBridge {
     /**
      * Shares file(s) or text payload using Android's native Bluetooth service.
      */
-    fun sendViaBluetooth(context: Context, uris: List<Uri>, textPayload: String? = null): Boolean {
+    fun sendViaBluetooth(
+        context: Context,
+        uris: List<Uri>,
+        textPayload: String? = null,
+        targetMac: String? = null
+    ): Boolean {
         val intent = Intent().apply {
             action = if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            setPackage("com.android.bluetooth")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
             if (uris.size > 1) {
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
@@ -107,10 +112,25 @@ object TransferBridge {
                 putExtra(Intent.EXTRA_TEXT, textPayload)
                 type = "text/plain"
             }
+
+            if (!targetMac.isNullOrBlank()) {
+                val cleanMac = targetMac.removePrefix("bt:")
+                try {
+                    val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+                    val adapter = bluetoothManager?.adapter
+                    val device = adapter?.getRemoteDevice(cleanMac)
+                    if (device != null) {
+                        putExtra("android.bluetooth.device.extra.DEVICE", device)
+                    }
+                } catch (_: Exception) {}
+            }
         }
 
         return try {
-            context.startActivity(intent)
+            val btIntent = Intent(intent).apply {
+                setPackage("com.android.bluetooth")
+            }
+            context.startActivity(btIntent)
             true
         } catch (_: Exception) {
             // Fallback to system chooser targeting Bluetooth or general sharing
@@ -131,6 +151,7 @@ object TransferBridge {
             val intent = Intent().apply {
                 action = if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
                 if (uris.size > 1) {
                     putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
@@ -143,7 +164,10 @@ object TransferBridge {
                     type = "text/plain"
                 }
             }
-            context.startActivity(Intent.createChooser(intent, chooserTitle))
+            val chooser = Intent.createChooser(intent, chooserTitle).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
             true
         } catch (_: Exception) {
             false

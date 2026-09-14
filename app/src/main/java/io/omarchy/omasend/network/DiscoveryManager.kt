@@ -285,6 +285,10 @@ class DiscoveryManager(private val context: Context) {
                             lastSeen = now
                         )
                         changed = true
+                    } else if (existing.transport == "BT" || existing.transport == "HYBRID") {
+                        peerMap[existing.id] = existing.copy(
+                            lastSeen = now + 60_000L
+                        )
                     }
                 } else {
                     val peer = DiscoveredPeer(
