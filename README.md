@@ -8,6 +8,7 @@
   <a href="https://play.google.com/apps/testing/io.omarchy.omasend"><img src="https://img.shields.io/badge/Google%20Play-Closed%20Beta-34A853?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play Closed Beta" /></a>
   <a href="https://groups.google.com/g/omasend-testers"><img src="https://img.shields.io/badge/Google%20Group-Join%20Testers-4285F4?style=for-the-badge&logo=googlegroups&logoColor=white" alt="Join Google Group" /></a>
   <a href="https://github.com/ozdil/omarchy-omasend"><img src="https://img.shields.io/badge/Omarchy%20Linux-Desktop%20Plugin-00ADD8?style=for-the-badge&logo=archlinux&logoColor=white" alt="Omarchy Linux Desktop Plugin" /></a>
+  <a href="https://buymeacoffee.com/ozdil"><img src="https://img.shields.io/badge/Buy_Me_A_Coffee-Support-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
 </p>
 
@@ -80,6 +81,14 @@ cd omasend-android
 # Install directly to connected phone via ADB
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+---
+
+## Support & Sponsorship
+
+If you find OmaSend useful and want to support independent development:
+
+<a href="https://buymeacoffee.com/ozdil" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 50px !important;width: 180px !important;" ></a>
 
 ---
 
