@@ -190,4 +190,73 @@ class DiscoverySimulationTest {
         val parsedDecision = json.decodeFromString<TransferDecision>(decisionJson)
         assertEquals("ACCEPT", parsedDecision.status)
     }
+
+    @Test
+    fun testRfc1918AndLinkLocalIpValidation() {
+        // RFC 1918 Private & Local IPs
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("127.0.0.1"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("localhost"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("10.0.0.1"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("10.255.255.254"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("172.16.0.1"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("172.31.255.254"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("192.168.0.1"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("192.168.1.100:53317"))
+        assertTrue(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("169.254.1.1"))
+
+        // Public / WAN IPs and invalid inputs MUST be rejected
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("8.8.8.8"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("1.1.1.1"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("172.32.0.1"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("192.169.1.1"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("203.0.113.195"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("invalid_host"))
+        assertFalse(io.omarchy.omasend.network.NetworkUtils.isPrivateOrLocalIp("10.0.0.256"))
+    }
+
+    @Test
+    fun testFilenameSanitizationAndPathTraversalDefense() {
+        // Path traversal attempts
+        val traversed = io.omarchy.omasend.network.StorageUtils.sanitizeFilename("../../etc/passwd")
+        assertFalse(traversed.contains("/"))
+        assertFalse(traversed.contains(".."))
+
+        // Backslash traversal
+        val backslashed = io.omarchy.omasend.network.StorageUtils.sanitizeFilename("..\\..\\windows\\cmd.exe")
+        assertFalse(backslashed.contains("\\"))
+        assertFalse(backslashed.contains(".."))
+
+        // Null byte injection
+        val nullInjected = io.omarchy.omasend.network.StorageUtils.sanitizeFilename("safe.jpg\u0000.exe")
+        assertFalse(nullInjected.contains("\u0000"))
+
+        // Hidden files or empty
+        val hidden = io.omarchy.omasend.network.StorageUtils.sanitizeFilename(".bashrc")
+        assertTrue(hidden.startsWith("file_"))
+
+        // Legitimate file
+        val legit = io.omarchy.omasend.network.StorageUtils.sanitizeFilename("photo_2026-09-16.png")
+        assertEquals("photo_2026-09-16.png", legit)
+    }
+
+    @Test
+    fun testParseConnectionEndpointNetworkScope() {
+        // Valid private IP endpoints
+        val local = io.omarchy.omasend.network.TransferBridge.parseConnectionEndpoint("192.168.1.50:53317")
+        assertNotNull(local)
+        assertEquals("192.168.1.50", local?.first)
+        assertEquals(53317, local?.second)
+
+        val uriFormat = io.omarchy.omasend.network.TransferBridge.parseConnectionEndpoint("omasend://10.0.0.5:8080")
+        assertNotNull(uriFormat)
+        assertEquals("10.0.0.5", uriFormat?.first)
+        assertEquals(8080, uriFormat?.second)
+
+        // Public / WAN endpoints MUST be strictly rejected
+        val publicIp = io.omarchy.omasend.network.TransferBridge.parseConnectionEndpoint("8.8.8.8:53317")
+        assertEquals(null, publicIp)
+
+        val publicUri = io.omarchy.omasend.network.TransferBridge.parseConnectionEndpoint("http://1.1.1.1:53317")
+        assertEquals(null, publicUri)
+    }
 }

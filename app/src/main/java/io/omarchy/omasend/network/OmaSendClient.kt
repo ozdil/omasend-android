@@ -34,6 +34,9 @@ class OmaSendClient(private val context: Context) {
         targetPort: Int,
         files: List<TransferFileInfo>
     ): Result<String> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
         return try {
             val totalBytes = files.sumOf { it.size_bytes }
             val requestPayload = TransferRequest(
@@ -69,6 +72,9 @@ class OmaSendClient(private val context: Context) {
         token: String,
         timeoutSec: Int = 30
     ): Result<Boolean> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
         val deadline = System.currentTimeMillis() + (timeoutSec * 1000L)
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -105,6 +111,9 @@ class OmaSendClient(private val context: Context) {
         inputStream: InputStream,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int) -> Unit
     ): Result<Unit> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
         return try {
             val encodedName = URLEncoder.encode(filename, "UTF-8")
             val countingBody = object : RequestBody() {
@@ -150,6 +159,9 @@ class OmaSendClient(private val context: Context) {
         targetPort: Int,
         text: String
     ): Result<Unit> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
         return try {
             val payload = ClipboardPayload(
                 sender_id = NetworkUtils.getDeviceId(context),

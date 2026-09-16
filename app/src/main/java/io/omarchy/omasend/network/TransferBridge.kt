@@ -53,6 +53,7 @@ object TransferBridge {
         val portCandidate = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: 53317
 
         if (!isValidIpv4(ipCandidate)) return null
+        if (!NetworkUtils.isPrivateOrLocalIp(ipCandidate)) return null
         if (portCandidate !in 1024..65535) return null
 
         return Pair(ipCandidate, portCandidate)

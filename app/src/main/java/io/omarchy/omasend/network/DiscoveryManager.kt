@@ -89,6 +89,7 @@ class DiscoveryManager(private val context: Context) {
     }
 
     fun addManualPeer(ip: String, port: Int = NetworkUtils.PORT, name: String = "Direct ($ip)") {
+        if (!NetworkUtils.isPrivateOrLocalIp(ip)) return
         val peer = DiscoveredPeer(
             id = "manual_${ip.replace('.', '_')}_$port",
             name = name,
@@ -137,6 +138,9 @@ class DiscoveryManager(private val context: Context) {
                 while (isActive) {
                     try {
                         socket.receive(packet)
+                        val packetAddr = packet.address
+                        if (packetAddr == null || !NetworkUtils.isPrivateOrLocalAddress(packetAddr)) continue
+
                         val length = packet.length
                         if (length > 0) {
                             val rawJson = String(packet.data, 0, length, Charsets.UTF_8)
@@ -145,7 +149,7 @@ class DiscoveryManager(private val context: Context) {
                                 val myId = NetworkUtils.getDeviceId(context)
                                 val myIp = NetworkUtils.getLocalIpAddress()
                                 if (beacon.id != myId && beacon.ip != myIp) {
-                                    val senderIp = packet.address.hostAddress ?: beacon.ip
+                                    val senderIp = packetAddr.hostAddress ?: beacon.ip
                                     val peer = DiscoveredPeer(
                                         id = beacon.id,
                                         name = beacon.name,
