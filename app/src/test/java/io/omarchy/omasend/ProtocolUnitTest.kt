@@ -171,4 +171,27 @@ class ProtocolUnitTest {
         assertFalse(origChecksum.sha256Hex.equals(tampChecksum.sha256Hex, ignoreCase = true))
         assertFalse(origChecksum.md5Hex.equals(tampChecksum.md5Hex, ignoreCase = true))
     }
+
+    @Test
+    fun testMilitaryMemoryWipeAndBlake3Field() {
+        // 1. RAM Anti-forensics memory wipe
+        val sensitiveBuffer = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        StorageUtils.wipeMemory(sensitiveBuffer)
+        assertTrue(sensitiveBuffer.all { it == 0.toByte() })
+
+        // 2. TransferFileInfo with BLAKE3
+        val info = TransferFileInfo(
+            name = "confidential.pdf",
+            size_bytes = 2048L,
+            blake3 = "a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890",
+            sha256 = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+            md5 = "1234567890abcdef1234567890abcdef"
+        )
+        val encoded = json.encodeToString(TransferFileInfo.serializer(), info)
+        assertTrue(encoded.contains("\"blake3\""))
+        val decoded = json.decodeFromString<TransferFileInfo>(encoded)
+        assertEquals(info.blake3, decoded.blake3)
+        assertEquals(info.sha256, decoded.sha256)
+        assertEquals(info.md5, decoded.md5)
+    }
 }

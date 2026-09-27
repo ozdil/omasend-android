@@ -109,6 +109,7 @@ class OmaSendClient(private val context: Context) {
         filename: String,
         totalBytes: Long,
         inputStream: InputStream,
+        blake3: String? = null,
         sha256: String? = null,
         md5: String? = null,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int) -> Unit
@@ -126,11 +127,15 @@ class OmaSendClient(private val context: Context) {
                     val buffer = ByteArray(65536)
                     var uploaded = 0L
                     var read: Int
-                    while (inputStream.read(buffer).also { read = it } != -1) {
-                        sink.write(buffer, 0, read)
-                        uploaded += read
-                        val percent = if (totalBytes > 0) ((uploaded * 100) / totalBytes).toInt() else 0
-                        onProgress(uploaded, totalBytes, percent)
+                    try {
+                        while (inputStream.read(buffer).also { read = it } != -1) {
+                            sink.write(buffer, 0, read)
+                            uploaded += read
+                            val percent = if (totalBytes > 0) ((uploaded * 100) / totalBytes).toInt() else 0
+                            onProgress(uploaded, totalBytes, percent)
+                        }
+                    } finally {
+                        StorageUtils.wipeMemory(buffer)
                     }
                 }
             }
@@ -138,6 +143,7 @@ class OmaSendClient(private val context: Context) {
             val queryParams = buildString {
                 append("token=").append(token)
                 append("&filename=").append(encodedName)
+                if (!blake3.isNullOrBlank()) append("&blake3=").append(blake3)
                 if (!sha256.isNullOrBlank()) append("&sha256=").append(sha256)
                 if (!md5.isNullOrBlank()) append("&md5=").append(md5)
             }
@@ -146,6 +152,9 @@ class OmaSendClient(private val context: Context) {
                 .url("http://$targetIp:$targetPort/api/p2p/upload?$queryParams")
                 .post(countingBody)
 
+            if (!blake3.isNullOrBlank()) {
+                reqBuilder.addHeader("X-File-BLAKE3", blake3)
+            }
             if (!sha256.isNullOrBlank()) {
                 reqBuilder.addHeader("X-File-SHA256", sha256)
             }

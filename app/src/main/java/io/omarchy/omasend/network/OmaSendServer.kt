@@ -407,11 +407,14 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
+        val queryBlake3 = getQueryParam(query, "blake3").takeIf { it.isNotBlank() }
         val querySha256 = getQueryParam(query, "sha256").takeIf { it.isNotBlank() }
         val queryMd5 = getQueryParam(query, "md5").takeIf { it.isNotBlank() }
+        val headerBlake3 = headers["x-file-blake3"]?.takeIf { it.isNotBlank() }
         val headerSha256 = headers["x-file-sha256"]?.takeIf { it.isNotBlank() }
         val headerMd5 = headers["x-file-md5"]?.takeIf { it.isNotBlank() }
 
+        val expectedBlake3 = queryBlake3 ?: headerBlake3 ?: matchingFileInfo.blake3
         val expectedSha256 = querySha256 ?: headerSha256 ?: matchingFileInfo.sha256
         val expectedMd5 = queryMd5 ?: headerMd5 ?: matchingFileInfo.md5
 
@@ -424,6 +427,7 @@ class OmaSendServer(private val context: Context) {
             inputStream = input,
             totalBytes = contentLength,
             deadlineMs = uploadDeadline,
+            expectedBlake3 = expectedBlake3,
             expectedSha256 = expectedSha256,
             expectedMd5 = expectedMd5
         )

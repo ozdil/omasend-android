@@ -30,6 +30,7 @@ data class DiscoveredPeer(
 data class TransferFileInfo(
     val name: String,
     val size_bytes: Long,
+    val blake3: String? = null,
     val sha256: String? = null,
     val md5: String? = null
 )

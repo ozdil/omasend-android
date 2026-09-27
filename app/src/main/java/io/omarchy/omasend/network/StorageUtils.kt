@@ -32,17 +32,26 @@ object StorageUtils {
 
     data class ChecksumResult(
         val sha256Hex: String,
-        val md5Hex: String
+        val md5Hex: String,
+        val blake3Hex: String? = null
     )
+
+    fun wipeMemory(buffer: ByteArray) {
+        buffer.fill(0)
+    }
 
     fun computeChecksums(inputStream: InputStream): ChecksumResult {
         val sha256 = MessageDigest.getInstance("SHA-256")
         val md5 = MessageDigest.getInstance("MD5")
         val buffer = ByteArray(65536)
         var read: Int
-        while (inputStream.read(buffer).also { read = it } != -1) {
-            sha256.update(buffer, 0, read)
-            md5.update(buffer, 0, read)
+        try {
+            while (inputStream.read(buffer).also { read = it } != -1) {
+                sha256.update(buffer, 0, read)
+                md5.update(buffer, 0, read)
+            }
+        } finally {
+            wipeMemory(buffer)
         }
         return ChecksumResult(
             sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
@@ -56,6 +65,7 @@ object StorageUtils {
         inputStream: InputStream,
         totalBytes: Long,
         deadlineMs: Long = Long.MAX_VALUE,
+        expectedBlake3: String? = null,
         expectedSha256: String? = null,
         expectedMd5: String? = null,
         onProgress: ((bytesRead: Long, total: Long) -> Unit)? = null
@@ -171,21 +181,25 @@ object StorageUtils {
         var read: Int
         var remaining = totalBytes
 
-        while (remaining > 0) {
-            if (System.currentTimeMillis() > deadlineMs) {
-                throw java.io.InterruptedIOException("File upload exceeded monotonic deadline")
+        try {
+            while (remaining > 0) {
+                if (System.currentTimeMillis() > deadlineMs) {
+                    throw java.io.InterruptedIOException("File upload exceeded monotonic deadline")
+                }
+                val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
+                read = input.read(buffer, 0, toRead)
+                if (read == -1) break
+                output.write(buffer, 0, read)
+                sha256.update(buffer, 0, read)
+                md5.update(buffer, 0, read)
+                totalRead += read
+                remaining -= read
+                onProgress?.invoke(totalRead, totalBytes)
             }
-            val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
-            read = input.read(buffer, 0, toRead)
-            if (read == -1) break
-            output.write(buffer, 0, read)
-            sha256.update(buffer, 0, read)
-            md5.update(buffer, 0, read)
-            totalRead += read
-            remaining -= read
-            onProgress?.invoke(totalRead, totalBytes)
+            output.flush()
+        } finally {
+            wipeMemory(buffer)
         }
-        output.flush()
         return ChecksumResult(
             sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
             md5Hex = md5.digest().joinToString("") { "%02x".format(it) }
