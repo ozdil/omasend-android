@@ -109,6 +109,8 @@ class OmaSendClient(private val context: Context) {
         filename: String,
         totalBytes: Long,
         inputStream: InputStream,
+        sha256: String? = null,
+        md5: String? = null,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int) -> Unit
     ): Result<Unit> {
         if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
@@ -133,11 +135,25 @@ class OmaSendClient(private val context: Context) {
                 }
             }
 
-            val request = Request.Builder()
-                .url("http://$targetIp:$targetPort/api/p2p/upload?token=$token&filename=$encodedName")
-                .post(countingBody)
-                .build()
+            val queryParams = buildString {
+                append("token=").append(token)
+                append("&filename=").append(encodedName)
+                if (!sha256.isNullOrBlank()) append("&sha256=").append(sha256)
+                if (!md5.isNullOrBlank()) append("&md5=").append(md5)
+            }
 
+            val reqBuilder = Request.Builder()
+                .url("http://$targetIp:$targetPort/api/p2p/upload?$queryParams")
+                .post(countingBody)
+
+            if (!sha256.isNullOrBlank()) {
+                reqBuilder.addHeader("X-File-SHA256", sha256)
+            }
+            if (!md5.isNullOrBlank()) {
+                reqBuilder.addHeader("X-File-MD5", md5)
+            }
+
+            val request = reqBuilder.build()
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
                 Result.success(Unit)

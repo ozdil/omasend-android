@@ -11,6 +11,7 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.widget.Toast
+import io.omarchy.omasend.network.StorageUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1885,7 +1886,18 @@ suspend fun sendFileUriToPeer(
                 onState(TransferProgressState.Requesting(peer.name, fileName))
             }
 
-            val fileInfo = TransferFileInfo(fileName, fileSize)
+            val checksums = try {
+                context.contentResolver.openInputStream(uri)?.use { s ->
+                    StorageUtils.computeChecksums(s)
+                }
+            } catch (_: Exception) { null }
+
+            val fileInfo = TransferFileInfo(
+                name = fileName,
+                size_bytes = fileSize,
+                sha256 = checksums?.sha256Hex,
+                md5 = checksums?.md5Hex
+            )
             val requestResult = app.client.sendTransferRequest(peer.ip, peer.port, listOf(fileInfo))
 
             val token = requestResult.getOrElse {
@@ -1969,7 +1981,9 @@ suspend fun sendFileUriToPeer(
                 token = token,
                 filename = fileName,
                 totalBytes = fileSize,
-                inputStream = inputStream
+                inputStream = inputStream,
+                sha256 = checksums?.sha256Hex,
+                md5 = checksums?.md5Hex
             ) { bytes: Long, total: Long, pct: Int ->
                 scopeLaunchMain {
                     onState(TransferProgressState.Transferring(true, peer.name, fileName, bytes, total, pct))

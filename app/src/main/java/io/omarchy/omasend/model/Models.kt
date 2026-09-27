@@ -29,7 +29,9 @@ data class DiscoveredPeer(
 @Serializable
 data class TransferFileInfo(
     val name: String,
-    val size_bytes: Long
+    val size_bytes: Long,
+    val sha256: String? = null,
+    val md5: String? = null
 )
 
 @Serializable

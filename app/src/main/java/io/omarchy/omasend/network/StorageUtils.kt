@@ -9,6 +9,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 
 object StorageUtils {
 
@@ -29,12 +30,34 @@ object StorageUtils {
         }
     }
 
+    data class ChecksumResult(
+        val sha256Hex: String,
+        val md5Hex: String
+    )
+
+    fun computeChecksums(inputStream: InputStream): ChecksumResult {
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        val md5 = MessageDigest.getInstance("MD5")
+        val buffer = ByteArray(65536)
+        var read: Int
+        while (inputStream.read(buffer).also { read = it } != -1) {
+            sha256.update(buffer, 0, read)
+            md5.update(buffer, 0, read)
+        }
+        return ChecksumResult(
+            sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
+            md5Hex = md5.digest().joinToString("") { "%02x".format(it) }
+        )
+    }
+
     fun saveIncomingStream(
         context: Context,
         filename: String,
         inputStream: InputStream,
         totalBytes: Long,
         deadlineMs: Long = Long.MAX_VALUE,
+        expectedSha256: String? = null,
+        expectedMd5: String? = null,
         onProgress: ((bytesRead: Long, total: Long) -> Unit)? = null
     ): Pair<Boolean, String> {
         if (totalBytes <= 0 || totalBytes > MAX_FILE_SIZE) {
@@ -61,8 +84,23 @@ object StorageUtils {
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                     ?: return Pair(false, "Failed to create MediaStore entry")
 
-                resolver.openOutputStream(uri)?.use { out ->
-                    pipeStream(inputStream, out, totalBytes, deadlineMs, onProgress)
+                val checksums = try {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        pipeStreamWithChecksums(inputStream, out, totalBytes, deadlineMs, onProgress)
+                    } ?: return Pair(false, "Failed to open MediaStore output stream")
+                } catch (e: Exception) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    throw e
+                }
+
+                // Verify cryptographic integrity
+                if (expectedSha256 != null && !expectedSha256.equals(checksums.sha256Hex, ignoreCase = true)) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    return Pair(false, "File integrity failure: SHA-256 checksum mismatch")
+                }
+                if (expectedMd5 != null && !expectedMd5.equals(checksums.md5Hex, ignoreCase = true)) {
+                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                    return Pair(false, "File integrity failure: MD5 checksum mismatch")
                 }
 
                 contentValues.clear()
@@ -93,9 +131,25 @@ object StorageUtils {
                     }
                 }
 
-                FileOutputStream(target).use { out ->
-                    pipeStream(inputStream, out, totalBytes, deadlineMs, onProgress)
+                val checksums = try {
+                    FileOutputStream(target).use { out ->
+                        pipeStreamWithChecksums(inputStream, out, totalBytes, deadlineMs, onProgress)
+                    }
+                } catch (e: Exception) {
+                    if (target.exists()) target.delete()
+                    throw e
                 }
+
+                // Verify cryptographic integrity
+                if (expectedSha256 != null && !expectedSha256.equals(checksums.sha256Hex, ignoreCase = true)) {
+                    if (target.exists()) target.delete()
+                    return Pair(false, "File integrity failure: SHA-256 checksum mismatch")
+                }
+                if (expectedMd5 != null && !expectedMd5.equals(checksums.md5Hex, ignoreCase = true)) {
+                    if (target.exists()) target.delete()
+                    return Pair(false, "File integrity failure: MD5 checksum mismatch")
+                }
+
                 Pair(true, target.name)
             }
         } catch (e: Exception) {
@@ -103,13 +157,15 @@ object StorageUtils {
         }
     }
 
-    private fun pipeStream(
+    private fun pipeStreamWithChecksums(
         input: InputStream,
         output: OutputStream,
         totalBytes: Long,
         deadlineMs: Long,
         onProgress: ((bytesRead: Long, total: Long) -> Unit)?
-    ) {
+    ): ChecksumResult {
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        val md5 = MessageDigest.getInstance("MD5")
         val buffer = ByteArray(65536)
         var totalRead = 0L
         var read: Int
@@ -123,10 +179,16 @@ object StorageUtils {
             read = input.read(buffer, 0, toRead)
             if (read == -1) break
             output.write(buffer, 0, read)
+            sha256.update(buffer, 0, read)
+            md5.update(buffer, 0, read)
             totalRead += read
             remaining -= read
             onProgress?.invoke(totalRead, totalBytes)
         }
         output.flush()
+        return ChecksumResult(
+            sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
+            md5Hex = md5.digest().joinToString("") { "%02x".format(it) }
+        )
     }
 }

@@ -115,4 +115,60 @@ class ProtocolUnitTest {
         assertFalse(NetworkUtils.isPrivateOrLocalIp("1.1.1.1"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("142.250.190.46"))
     }
+
+    @Test
+    fun testTransferFileInfoWithSha256AndMd5Checksums() {
+        val sampleData = "Omarchy Zero-Trust Integrity Payload".toByteArray(Charsets.UTF_8)
+        val checksums = StorageUtils.computeChecksums(sampleData.inputStream())
+
+        assertTrue(checksums.sha256Hex.isNotEmpty())
+        assertEquals(64, checksums.sha256Hex.length)
+        assertTrue(checksums.md5Hex.isNotEmpty())
+        assertEquals(32, checksums.md5Hex.length)
+
+        val fileInfo = TransferFileInfo(
+            name = "document.pdf",
+            size_bytes = sampleData.size.toLong(),
+            sha256 = checksums.sha256Hex,
+            md5 = checksums.md5Hex
+        )
+
+        val encoded = json.encodeToString(TransferFileInfo.serializer(), fileInfo)
+        assertTrue(encoded.contains("\"sha256\":\"${checksums.sha256Hex}\""))
+        assertTrue(encoded.contains("\"md5\":\"${checksums.md5Hex}\""))
+
+        val decoded = json.decodeFromString<TransferFileInfo>(encoded)
+        assertEquals("document.pdf", decoded.name)
+        assertEquals(sampleData.size.toLong(), decoded.size_bytes)
+        assertEquals(checksums.sha256Hex, decoded.sha256)
+        assertEquals(checksums.md5Hex, decoded.md5)
+    }
+
+    @Test
+    fun testStorageUtilsChecksumComputationMatchesStandard() {
+        val data = "Hello AirBridge".toByteArray(Charsets.UTF_8)
+        val result = StorageUtils.computeChecksums(data.inputStream())
+
+        // "Hello AirBridge" known hashes:
+        // sha256: e868d4aefba7f525bf7b275217bb3a0d9229fa19d2dbd7348e3e4492bf353e89 (computed below via standard java MessageDigest)
+        val mdSha = java.security.MessageDigest.getInstance("SHA-256").digest(data)
+            .joinToString("") { "%02x".format(it) }
+        val mdMd5 = java.security.MessageDigest.getInstance("MD5").digest(data)
+            .joinToString("") { "%02x".format(it) }
+
+        assertEquals(mdSha, result.sha256Hex)
+        assertEquals(mdMd5, result.md5Hex)
+    }
+
+    @Test
+    fun testZeroTrustTransferRequestIntegrity() {
+        val original = "Original payload content".toByteArray(Charsets.UTF_8)
+        val tampered = "Tampered payload content".toByteArray(Charsets.UTF_8)
+
+        val origChecksum = StorageUtils.computeChecksums(original.inputStream())
+        val tampChecksum = StorageUtils.computeChecksums(tampered.inputStream())
+
+        assertFalse(origChecksum.sha256Hex.equals(tampChecksum.sha256Hex, ignoreCase = true))
+        assertFalse(origChecksum.md5Hex.equals(tampChecksum.md5Hex, ignoreCase = true))
+    }
 }

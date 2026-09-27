@@ -260,7 +260,7 @@ class OmaSendServer(private val context: Context) {
                     handleDecisionQuery(output, query)
                 }
                 method == "POST" && path == "/api/p2p/upload" -> {
-                    handleFileUpload(input, output, query, contentLength)
+                    handleFileUpload(input, output, headers, query, contentLength)
                 }
                 method == "POST" && path == "/api/p2p/clipboard" -> {
                     handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline)
@@ -374,7 +374,13 @@ class OmaSendServer(private val context: Context) {
         sendResponse(output, 200, "OK", "application/json", resp)
     }
 
-    private fun handleFileUpload(input: InputStream, output: OutputStream, query: String, contentLength: Long) {
+    private fun handleFileUpload(
+        input: InputStream,
+        output: OutputStream,
+        headers: Map<String, String>,
+        query: String,
+        contentLength: Long
+    ) {
         val token = getQueryParam(query, "token")
         val filenameRaw = getQueryParam(query, "filename")
         val filename = try {
@@ -394,6 +400,21 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
+        val cleanName = StorageUtils.sanitizeFilename(filename)
+        val matchingFileInfo = state.prompt.files.find { StorageUtils.sanitizeFilename(it.name) == cleanName }
+        if (matchingFileInfo == null) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"File not listed in approved transfer request\"}")
+            return
+        }
+
+        val querySha256 = getQueryParam(query, "sha256").takeIf { it.isNotBlank() }
+        val queryMd5 = getQueryParam(query, "md5").takeIf { it.isNotBlank() }
+        val headerSha256 = headers["x-file-sha256"]?.takeIf { it.isNotBlank() }
+        val headerMd5 = headers["x-file-md5"]?.takeIf { it.isNotBlank() }
+
+        val expectedSha256 = querySha256 ?: headerSha256 ?: matchingFileInfo.sha256
+        val expectedMd5 = queryMd5 ?: headerMd5 ?: matchingFileInfo.md5
+
         val uploadDurationMs = ((contentLength / (512 * 1024L)).coerceIn(30L, 600L)) * 1000L
         val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
 
@@ -402,7 +423,9 @@ class OmaSendServer(private val context: Context) {
             filename = filename,
             inputStream = input,
             totalBytes = contentLength,
-            deadlineMs = uploadDeadline
+            deadlineMs = uploadDeadline,
+            expectedSha256 = expectedSha256,
+            expectedMd5 = expectedMd5
         )
 
         if (saved) {
@@ -413,7 +436,10 @@ class OmaSendServer(private val context: Context) {
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } else {
-            sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
+            val isIntegrityError = finalName.contains("integrity failure", ignoreCase = true)
+            val statusCode = if (isIntegrityError) 422 else 500
+            val statusMsg = if (isIntegrityError) "Unprocessable Entity" else "Internal Server Error"
+            sendResponse(output, statusCode, statusMsg, "application/json", "{\"error\":\"$finalName\"}")
         }
     }
 
