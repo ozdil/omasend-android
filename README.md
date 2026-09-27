@@ -59,6 +59,24 @@ OmaSend for Android is distributed officially via **Google Play** with verified 
 
 ---
 
+## ⚔️ Military-Grade Security Architecture (vs. Standard Consumer Tools)
+
+OmaSend for Android elevates local file transfer from standard consumer tools (like LocalSend) to a **Military-Grade, Zero-Trust** architecture:
+
+1. **Anti-Forensics & RAM Zeroization (Memory Scrubbing):**
+   - **OmaSend:** Cryptographic keys, in-flight transit buffers, and sensitive data are scrubbed from RAM immediately after use via `try...finally` blocks using `StorageUtils.wipeMemory(buffer.fill(0))`. Even if a device is seized and a memory dump is extracted, the data cannot be recovered.
+   - **Standard Tools (e.g., LocalSend):** Rely on automated Garbage Collection (e.g., Dart VM). Keys and sensitive data can remain in RAM indefinitely without guaranteed memory scrubbing.
+
+2. **Quantum-Resilient Cryptography:**
+   - **OmaSend:** Integrates **BLAKE3**, a high-performance, quantum-resilient Merkle tree cryptographic hashing algorithm for stream and protocol header validation, alongside standard SHA-256 and MD5.
+   - **Standard Tools:** Utilize classical SHA-256 for basic fingerprinting, lacking post-quantum cryptographic hashing structures.
+
+3. **Technology Stack & Memory Safety:**
+   - **OmaSend:** Built natively in **Kotlin** allowing for deep OS integration, explicit byte-level memory zeroization, and native Android lifecycle and memory management controls.
+   - **Standard Tools:** Often built on cross-platform frameworks (e.g., Flutter/Dart), which abstracts and restricts direct memory scrubbing capabilities.
+
+---
+
 ## 🖥️ Omarchy Linux Desktop Integration
 
 OmaSend for Android is designed to pair seamlessly with the official Omarchy Linux desktop plugin:
