@@ -37,7 +37,7 @@ class OmaSendServer(private val context: Context) {
     // Token -> PendingTransfer
     data class PendingState(
         val prompt: IncomingTransferPrompt,
-        val expiresAt: Long,
+        var expiresAt: Long,
         var status: String // "PENDING", "ACCEPTED", "REJECTED"
     )
 
@@ -71,9 +71,33 @@ class OmaSendServer(private val context: Context) {
     private val failedAuthAttempts = ConcurrentHashMap<String, FailedAttemptRecord>()
     private val trustedPeers = ConcurrentHashMap<String, Long>()
 
+    private val prefs = context.getSharedPreferences("omasend_trusted_peers", Context.MODE_PRIVATE)
+
+    init {
+        loadTrustedPeers()
+    }
+
+    private fun loadTrustedPeers() {
+        try {
+            val stored = prefs.getStringSet("trusted_peer_ids", emptySet()) ?: emptySet()
+            for (id in stored) {
+                if (id.isNotBlank()) {
+                    trustedPeers[id] = System.currentTimeMillis()
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun saveTrustedPeers() {
+        try {
+            prefs.edit().putStringSet("trusted_peer_ids", trustedPeers.keys.toSet()).apply()
+        } catch (_: Exception) {}
+    }
+
     fun addTrustedPeer(senderId: String) {
         if (senderId.isNotBlank()) {
             trustedPeers[senderId] = System.currentTimeMillis()
+            saveTrustedPeers()
         }
     }
 
@@ -85,6 +109,7 @@ class OmaSendServer(private val context: Context) {
     fun acceptTransfer(token: String) {
         val state = pendingTransfers[token] ?: return
         state.status = "ACCEPTED"
+        state.expiresAt = System.currentTimeMillis() + 600000L // 10 minutes for transfer
         addTrustedPeer(state.prompt.senderId)
     }
 
@@ -339,17 +364,25 @@ class OmaSendServer(private val context: Context) {
                 totalSizeBytes = req.total_size_bytes
             )
 
+            val isTrusted = isPeerTrusted(req.sender_id)
+            val initialStatus = if (isTrusted) "ACCEPTED" else "PENDING"
+            val expiryTime = if (isTrusted) System.currentTimeMillis() + 600000L else System.currentTimeMillis() + 30000L
+
             pendingTransfers[token] = PendingState(
                 prompt = prompt,
-                expiresAt = System.currentTimeMillis() + 30000,
-                status = "PENDING"
+                expiresAt = expiryTime,
+                status = initialStatus
             )
 
             Handler(Looper.getMainLooper()).post {
-                onIncomingTransferPrompt?.invoke(prompt)
+                if (isTrusted) {
+                    io.omarchy.omasend.ui.OmaSendHaptics.performTransferStart(context)
+                } else {
+                    onIncomingTransferPrompt?.invoke(prompt)
+                }
             }
 
-            val resp = """{"status":"PENDING","token":"$token"}"""
+            val resp = """{"status":"$initialStatus","token":"$token"}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } catch (_: Exception) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid request\"}")
@@ -435,6 +468,7 @@ class OmaSendServer(private val context: Context) {
         if (saved) {
             pendingTransfers.remove(token)
             Handler(Looper.getMainLooper()).post {
+                io.omarchy.omasend.ui.OmaSendHaptics.performTransferSuccess(context)
                 onFileReceived?.invoke(finalName, contentLength)
             }
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""

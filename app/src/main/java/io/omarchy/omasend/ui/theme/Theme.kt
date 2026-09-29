@@ -72,6 +72,7 @@ fun OmaSendTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = OmaSendTypography,
         content = content
     )
 }

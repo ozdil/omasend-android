@@ -1,6 +1,7 @@
 package io.omarchy.omasend.ui
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -11,7 +12,6 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.widget.Toast
-import io.omarchy.omasend.network.StorageUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,10 +21,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,9 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -53,6 +51,7 @@ import com.google.zxing.qrcode.QRCodeWriter
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.model.*
 import io.omarchy.omasend.network.NetworkUtils
+import io.omarchy.omasend.network.StorageUtils
 import io.omarchy.omasend.network.TransferBridge
 import io.omarchy.omasend.service.OmaSendForegroundService
 import kotlinx.coroutines.Dispatchers
@@ -73,94 +72,73 @@ fun RadarScreen(
     val peers by app.discoveryManager.peers.collectAsState()
     val discoveryMode by app.discoveryManager.discoveryMode.collectAsState()
 
-    var selectedPeer by remember { mutableStateOf<DiscoveredPeer?>(null) }
+    var activeTargetPeer by remember { mutableStateOf<DiscoveredPeer?>(null) }
     var transferState by remember { mutableStateOf<TransferProgressState>(TransferProgressState.Idle) }
 
     var showInfoDialog by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
     var showDirectIpDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var showTargetSelectorDialog by remember { mutableStateOf(false) }
-    var pendingUrisToSend by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var showRecentFilesSheet by remember { mutableStateOf(false) }
 
     var recentFiles by remember { mutableStateOf<List<File>>(emptyList()) }
-    var isRefreshing by remember { mutableStateOf(false) }
+    var clipboardText by remember { mutableStateOf<String?>(null) }
+    val refreshRotation = remember { Animatable(0f) }
 
     fun refreshRecentFiles() {
         recentFiles = getRecentReceivedFiles()
     }
 
-    LaunchedEffect(Unit) {
-        refreshRecentFiles()
+    fun checkClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipboard?.primaryClip
+        if (clip != null && clip.itemCount > 0) {
+            val isSensitive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                clip.description?.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false) ?: false
+            } else {
+                false
+            }
+            if (!isSensitive) {
+                val text = clip.getItemAt(0).text?.toString()
+                if (!text.isNullOrBlank() && text.length <= 1048576) {
+                    clipboardText = text
+                } else {
+                    clipboardText = null
+                }
+            } else {
+                clipboardText = null
+            }
+        } else {
+            clipboardText = null
+        }
     }
 
-    // Refresh animation
-    val refreshRotation = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        refreshRecentFiles()
+        checkClipboard()
+    }
 
-    // Multi-file picker (Documents / Any file)
+    // Dosya Secici
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            if (selectedPeer != null) {
-                scope.launch {
-                    sendMultipleUrisToPeer(context, app, selectedPeer!!, uris) { state ->
-                        transferState = state
-                        if (state is TransferProgressState.Success) refreshRecentFiles()
-                    }
+        if (uris.isNotEmpty() && activeTargetPeer != null) {
+            val peer = activeTargetPeer!!
+            scope.launch {
+                sendMultipleUrisToPeer(context, app, peer, uris) { state ->
+                    transferState = state
+                    if (state is TransferProgressState.Success) refreshRecentFiles()
                 }
-            } else {
-                pendingUrisToSend = uris
-                showTargetDeviceSheetOrFallback(peers, onSelectTarget = { peer ->
-                    selectedPeer = peer
-                    scope.launch {
-                        sendMultipleUrisToPeer(context, app, peer, uris) { state ->
-                            transferState = state
-                            if (state is TransferProgressState.Success) refreshRecentFiles()
-                        }
-                    }
-                }, onNoTarget = {
-                    showTargetSelectorDialog = true
-                })
             }
         }
     }
 
-    // Media Picker (Images & Videos)
+    // Medya Secici (Fotograf / Video)
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            if (selectedPeer != null) {
-                scope.launch {
-                    sendMultipleUrisToPeer(context, app, selectedPeer!!, uris) { state ->
-                        transferState = state
-                        if (state is TransferProgressState.Success) refreshRecentFiles()
-                    }
-                }
-            } else {
-                pendingUrisToSend = uris
-                showTargetDeviceSheetOrFallback(peers, onSelectTarget = { peer ->
-                    selectedPeer = peer
-                    scope.launch {
-                        sendMultipleUrisToPeer(context, app, peer, uris) { state ->
-                            transferState = state
-                            if (state is TransferProgressState.Success) refreshRecentFiles()
-                        }
-                    }
-                }, onNoTarget = {
-                    showTargetSelectorDialog = true
-                })
-            }
-        }
-    }
-
-    // Direct single file picker for specific peer click
-    val singlePeerFilePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty() && selectedPeer != null) {
-            val peer = selectedPeer!!
+        if (uris.isNotEmpty() && activeTargetPeer != null) {
+            val peer = activeTargetPeer!!
             scope.launch {
                 sendMultipleUrisToPeer(context, app, peer, uris) { state ->
                     transferState = state
@@ -174,55 +152,49 @@ fun RadarScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            shape = CircleShape,
+                            shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    Icons.Default.Send,
+                                    Icons.Default.Share,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "OmaSend",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (discoveryMode != DiscoveryMode.OFF) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "OMASEND",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    letterSpacing = 1.2.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
-                                        .size(6.dp)
+                                        .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981) else Color.Gray)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = if (discoveryMode != DiscoveryMode.OFF) "Çevrimiçi" else "Duraklatıldı",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (discoveryMode != DiscoveryMode.OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    softWrap = false
+                                        .background(
+                                            if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981)
+                                            else Color(0xFF6B7280)
+                                        )
                                 )
                             }
+                            Text(
+                                text = "${NetworkUtils.getDeviceName(context)} (${NetworkUtils.getLocalIpAddress()})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 },
@@ -230,15 +202,13 @@ fun RadarScreen(
                     IconButton(
                         onClick = {
                             scope.launch {
-                                isRefreshing = true
                                 refreshRotation.animateTo(
                                     targetValue = refreshRotation.value + 360f,
-                                    animationSpec = tween(600, easing = FastOutSlowInEasing)
+                                    animationSpec = tween(500, easing = FastOutSlowInEasing)
                                 )
                                 app.discoveryManager.forceRefresh()
                                 refreshRecentFiles()
-                                isRefreshing = false
-                                Toast.makeText(context, "Ağ ve Bluetooth eşleri güncellendi", Toast.LENGTH_SHORT).show()
+                                checkClipboard()
                             }
                         },
                         modifier = Modifier.size(38.dp)
@@ -250,35 +220,38 @@ fun RadarScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(
-                        onClick = { showQrDialog = true },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.QrCode,
-                            contentDescription = "Web QR Paylaşım",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+
                     IconButton(
                         onClick = { showDirectIpDialog = true },
                         modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             Icons.Default.AddLink,
-                            contentDescription = "Doğrudan IP Ekle",
+                            contentDescription = "IP ile Baglan",
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    IconButton(
+                        onClick = { showQrDialog = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.QrCode,
+                            contentDescription = "Web Portali QR",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     IconButton(
                         onClick = { showInfoDialog = true },
                         modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             Icons.Default.Info,
-                            contentDescription = "Bilgi",
+                            contentDescription = "Hakkinda",
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -291,168 +264,209 @@ fun RadarScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // 1. Cihazım ve Görünürlük Kartı
-            item {
-                LocalDeviceHeroCard(
-                    context = context,
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // 1. Gorunurluk Secici (Segmented Selector)
+                ZenVisibilityBar(
                     currentMode = discoveryMode,
                     onModeSelected = { newMode ->
                         app.discoveryManager.setMode(newMode)
                         if (newMode == DiscoveryMode.OFF) {
                             OmaSendForegroundService.stopService(context)
-                            Toast.makeText(context, "Görünürlük kapatıldı", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Gorunurluk kapatildi", Toast.LENGTH_SHORT).show()
                         } else {
                             OmaSendForegroundService.startService(context)
-                            val msg = if (newMode == DiscoveryMode.KNOWN_PEERS) {
-                                "Yalnızca bilinen ve eşleşmiş cihazlar taranıyor"
-                            } else {
-                                "Görünürlük: Herkese Açık (10 dk)"
-                            }
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         }
-                    },
-                    onRename = { showRenameDialog = true }
+                    }
                 )
-            }
 
-            // 2. Hızlı Gönderim Butonları (Kullanımı Kolaylaştıran Hub)
-            item {
-                QuickSendHubCard(
-                    onPickFiles = { filePickerLauncher.launch("*/*") },
-                    onPickMedia = {
-                        mediaPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                        )
-                    },
-                    onSendClipboard = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        val clipText = clipboard?.primaryClip?.let {
-                            if (it.itemCount > 0) it.getItemAt(0).text?.toString() else null
-                        }
-                        if (clipText.isNullOrEmpty()) {
-                            Toast.makeText(context, "Telefon panosu boş!", Toast.LENGTH_SHORT).show()
-                        } else if (peers.isEmpty()) {
-                            Toast.makeText(context, "Panoyu gönderecek yakında cihaz bulunamadı", Toast.LENGTH_SHORT).show()
-                        } else {
-                            val target = selectedPeer ?: peers.first()
-                            scope.launch {
-                                sendClipboardToPeer(context, app, target) { state ->
-                                    transferState = state
-                                }
-                            }
-                        }
-                    },
-                    onShowWebPortal = { showQrDialog = true }
-                )
-            }
+                Spacer(modifier = Modifier.height(10.dp))
 
-            // 3. Aktif Transfer Durum Bildirimi
-            if (transferState !is TransferProgressState.Idle) {
-                item {
+                // 2. Aktif Transfer Durumu
+                if (transferState !is TransferProgressState.Idle) {
                     TransferStatusCard(
                         state = transferState,
                         onDismiss = { transferState = TransferProgressState.Idle }
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
 
-            // 4. Yakındaki ve Eşleşmiş Cihazlar Listesi
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "YAKINDAKİ CİHAZLAR",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 0.8.sp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = CircleShape,
-                            color = if (peers.isNotEmpty()) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${peers.size}",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (peers.isNotEmpty()) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+            // 3. Ana Merkez: Cihaz Listesi / Radar
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                if (peers.isEmpty()) {
+                    EmptyDiscoveryRadar(
+                        isScanning = discoveryMode != DiscoveryMode.OFF,
+                        localIp = NetworkUtils.getLocalIpAddress(),
+                        onDirectIpClick = { showDirectIpDialog = true }
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(vertical = 6.dp)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "YAKINDAKI CIHAZLAR (${peers.size})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = "Sifir Guven • BLAKE3",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        items(peers, key = { it.id }) { peer ->
+                            PeerActionCard(
+                                peer = peer,
+                                onTrustToggle = { app.discoveryManager.toggleTrust(peer.id) },
+                                onSendFile = {
+                                    activeTargetPeer = peer
+                                    filePickerLauncher.launch("*/*")
+                                },
+                                onSendMedia = {
+                                    activeTargetPeer = peer
+                                    mediaPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                    )
+                                },
+                                onSendClipboard = {
+                                    OmaSendHaptics.performTransferStart(context)
+                                    scope.launch {
+                                        sendClipboardToPeer(context, app, peer) { state ->
+                                            transferState = state
+                                        }
+                                    }
+                                }
                             )
                         }
                     }
                 }
             }
 
-            if (peers.isEmpty()) {
-                item {
-                    CleanEmptyStateCard(
-                        discoveryMode = discoveryMode,
-                        onEnableScan = {
-                            app.discoveryManager.setMode(DiscoveryMode.EVERYONE)
-                            OmaSendForegroundService.startService(context)
-                        },
-                        onSwitchToEveryone = {
-                            app.discoveryManager.setMode(DiscoveryMode.EVERYONE)
-                        },
-                        onAddDirectIp = { showDirectIpDialog = true }
-                    )
-                }
-            } else {
-                items(peers, key = { it.id }) { peer ->
-                    ModernPeerCard(
-                        peer = peer,
-                        isSelected = selectedPeer?.id == peer.id,
-                        onCardClick = {
-                            selectedPeer = if (selectedPeer?.id == peer.id) null else peer
-                        },
-                        onToggleTrust = {
-                            app.discoveryManager.toggleTrust(peer.id)
-                        },
-                        onSendClick = {
-                            selectedPeer = peer
-                            singlePeerFilePicker.launch("*/*")
-                        },
-                        onClipboardClick = {
-                            selectedPeer = peer
-                            scope.launch {
-                                sendClipboardToPeer(context, app, peer) { state ->
-                                    transferState = state
+            // 4. Alt Akilli Alan: Pano Kartı + Alt Islemler
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!clipboardText.isNullOrBlank()) {
+                    val preview = clipboardText!!.trim()
+                    val targetPeer = peers.firstOrNull()
+
+                    LiveClipboardCard(
+                        preview = preview,
+                        targetPeer = targetPeer,
+                        onSend = {
+                            if (targetPeer == null) {
+                                Toast.makeText(context, "Pano iletimi icin yakinda cihaz bulunamadi", Toast.LENGTH_SHORT).show()
+                            } else {
+                                OmaSendHaptics.performTransferStart(context)
+                                scope.launch {
+                                    sendClipboardToPeer(context, app, targetPeer) { state ->
+                                        transferState = state
+                                    }
                                 }
                             }
                         }
                     )
                 }
-            }
 
-            // 5. Son Alınan Dosyalar (Ekstra Kolaylık Özelliği)
-            if (recentFiles.isNotEmpty()) {
-                item {
-                    RecentReceivedFilesCard(
-                        files = recentFiles,
-                        onOpenFile = { file -> openFileWithSystem(context, file) },
-                        onShareFile = { file -> shareFileWithSystem(context, file) }
-                    )
-                }
+                CleanBottomBar(
+                    recentFilesCount = recentFiles.size,
+                    onRenameClick = { showRenameDialog = true },
+                    onRecentFilesClick = { showRecentFilesSheet = true }
+                )
             }
         }
     }
 
-    // Dialogs
+    // Modal Sheet: Son Alinan Dosyalar
+    if (showRecentFilesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showRecentFilesSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "SON ALINAN DOSYALAR",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Downloads/OmaSend",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (recentFiles.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Henuz alinan bir dosya bulunmuyor",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(recentFiles) { file ->
+                            RecentFileRow(
+                                file = file,
+                                onOpenFile = { openFileWithSystem(context, file) },
+                                onShareFile = { shareFileWithSystem(context, file) }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+
+    // Diyaloglar
     if (showRenameDialog) {
         RenameDeviceDialog(
             currentName = NetworkUtils.getDeviceName(context),
@@ -460,7 +474,7 @@ fun RadarScreen(
             onConfirm = { newName ->
                 NetworkUtils.setDeviceName(context, newName)
                 showRenameDialog = false
-                Toast.makeText(context, "Cihaz adı güncellendi: $newName", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Cihaz adi kaydedildi: $newName", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -487,27 +501,7 @@ fun RadarScreen(
         InfoDialog(onDismiss = { showInfoDialog = false })
     }
 
-    if (showTargetSelectorDialog) {
-        TargetDeviceSelectionDialog(
-            peers = peers,
-            onDismiss = { showTargetSelectorDialog = false },
-            onSelect = { peer ->
-                showTargetSelectorDialog = false
-                selectedPeer = peer
-                if (pendingUrisToSend.isNotEmpty()) {
-                    scope.launch {
-                        sendMultipleUrisToPeer(context, app, peer, pendingUrisToSend) { state ->
-                            transferState = state
-                            if (state is TransferProgressState.Success) refreshRecentFiles()
-                        }
-                        pendingUrisToSend = emptyList()
-                    }
-                }
-            }
-        )
-    }
-
-    // Gelen Transfer İstemi
+    // Gelen Transfer Onay Istemi (Sifir Guven Dogrulamasi)
     if (incomingPrompt != null) {
         IncomingTransferDialog(
             prompt = incomingPrompt,
@@ -517,458 +511,377 @@ fun RadarScreen(
     }
 }
 
-private fun showTargetDeviceSheetOrFallback(
-    peers: List<DiscoveredPeer>,
-    onSelectTarget: (DiscoveredPeer) -> Unit,
-    onNoTarget: () -> Unit
-) {
-    if (peers.size == 1) {
-        onSelectTarget(peers.first())
-    } else {
-        onNoTarget()
-    }
-}
-
-// ------------------- UI BİLEŞENLERİ (MATERIAL 3) -------------------
+// ------------------- KART VE BILESEN TANIMLARI -------------------
 
 @Composable
-fun RadarPulseAvatar(
-    isScanning: Boolean,
-    modifier: Modifier = Modifier
-) {
-    if (isScanning) {
-        val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
-        val wave1Scale by infiniteTransition.animateFloat(
-            initialValue = 1f,
-            targetValue = 1.6f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Wave1Scale"
-        )
-        val wave1Alpha by infiniteTransition.animateFloat(
-            initialValue = 0.45f,
-            targetValue = 0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Wave1Alpha"
-        )
-        val wave2Scale by infiniteTransition.animateFloat(
-            initialValue = 1f,
-            targetValue = 1.6f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, delayMillis = 1000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Wave2Scale"
-        )
-        val wave2Alpha by infiniteTransition.animateFloat(
-            initialValue = 0.45f,
-            targetValue = 0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, delayMillis = 1000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Wave2Alpha"
-        )
-
-        Box(
-            modifier = modifier.size(52.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .graphicsLayer {
-                        scaleX = wave1Scale
-                        scaleY = wave1Scale
-                        alpha = wave1Alpha
-                    }
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-            )
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .graphicsLayer {
-                        scaleX = wave2Scale
-                        scaleY = wave2Scale
-                        alpha = wave2Alpha
-                    }
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-            )
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(46.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.PhoneAndroid,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-    } else {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = modifier.size(46.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.PhoneAndroid,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun LocalDeviceHeroCard(
-    context: Context,
+fun ZenVisibilityBar(
     currentMode: DiscoveryMode,
-    onModeSelected: (DiscoveryMode) -> Unit,
-    onRename: () -> Unit
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RadarPulseAvatar(isScanning = currentMode != DiscoveryMode.OFF)
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = NetworkUtils.getDeviceName(context),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = onRename,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Adı Değiştir",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "IP: ${NetworkUtils.getLocalIpAddress()}:53317 • BT Aktif",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Visibility Segmented Options
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                listOf(
-                    Triple(DiscoveryMode.EVERYONE, "Herkes", Icons.Default.Public),
-                    Triple(DiscoveryMode.KNOWN_PEERS, "Bilinenler", Icons.Default.Group),
-                    Triple(DiscoveryMode.OFF, "Kapalı", Icons.Default.Lock)
-                ).forEach { (mode, label, icon) ->
-                    val isSelected = currentMode == mode
-                    Surface(
-                        onClick = { onModeSelected(mode) },
-                        shape = RoundedCornerShape(9.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                icon,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp),
-                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickSendHubCard(
-    onPickFiles: () -> Unit,
-    onPickMedia: () -> Unit,
-    onSendClipboard: () -> Unit,
-    onShowWebPortal: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "HIZLI GÖNDERİM",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 0.8.sp,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            QuickActionItem(
-                title = "Dosyalar",
-                icon = Icons.Default.Folder,
-                modifier = Modifier.weight(1f),
-                onClick = onPickFiles
-            )
-            QuickActionItem(
-                title = "Galeri",
-                icon = Icons.Default.Image,
-                modifier = Modifier.weight(1f),
-                onClick = onPickMedia
-            )
-            QuickActionItem(
-                title = "Pano",
-                icon = Icons.Default.ContentCopy,
-                modifier = Modifier.weight(1f),
-                onClick = onSendClipboard
-            )
-            QuickActionItem(
-                title = "Web Portal",
-                icon = Icons.Default.QrCode,
-                modifier = Modifier.weight(1f),
-                onClick = onShowWebPortal
-            )
-        }
-    }
-}
-
-@Composable
-fun QuickActionItem(
-    title: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onModeSelected: (DiscoveryMode) -> Unit
 ) {
     Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = modifier.height(82.dp)
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Row(
+            modifier = Modifier.padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Icon(
-                icon,
-                contentDescription = title,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            listOf(
+                Triple(DiscoveryMode.EVERYONE, "Herkes", Icons.Default.Public),
+                Triple(DiscoveryMode.KNOWN_PEERS, "Bilinenler", Icons.Default.VerifiedUser),
+                Triple(DiscoveryMode.OFF, "Görünmez", Icons.Default.Lock)
+            ).forEach { (mode, label, icon) ->
+                val isSelected = currentMode == mode
+                Surface(
+                    onClick = { onModeSelected(mode) },
+                    shape = RoundedCornerShape(9.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-fun ModernPeerCard(
-    peer: DiscoveredPeer,
-    isSelected: Boolean,
-    onCardClick: () -> Unit,
-    onToggleTrust: () -> Unit = {},
-    onSendClick: () -> Unit,
-    onClipboardClick: () -> Unit
+fun EmptyDiscoveryRadar(
+    isScanning: Boolean,
+    localIp: String,
+    onDirectIpClick: () -> Unit
 ) {
-    ElevatedCard(
-        onClick = onCardClick,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainer
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarSonar")
+    val pulse1 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
+        label = "Pulse1"
+    )
+    val alpha1 by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "Alpha1"
+    )
+
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (isSelected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
-                else Modifier
-            )
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
+        if (isScanning) {
+            Box(
+                modifier = Modifier
+                    .size(240.dp)
+                    .scale(pulse1)
+                    .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = alpha1), CircleShape)
+            )
+        }
+
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(200.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f), CircleShape)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .padding(16.dp)
         ) {
-            Surface(
-                shape = CircleShape,
-                color = when (peer.transport) {
-                    "BT" -> MaterialTheme.colorScheme.tertiaryContainer
-                    "HYBRID" -> MaterialTheme.colorScheme.secondaryContainer
-                    else -> MaterialTheme.colorScheme.primaryContainer
-                },
-                modifier = Modifier.size(46.dp)
+            Column(
+                modifier = Modifier.padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    val icon = if (peer.transport == "BT") {
-                        Icons.Default.Bluetooth
-                    } else if (peer.name.lowercase().contains("phone") || peer.name.lowercase().contains("android")) {
-                        Icons.Default.PhoneAndroid
-                    } else if (peer.name.lowercase().contains("laptop") || peer.name.lowercase().contains("thinkpad")) {
-                        Icons.Default.Laptop
-                    } else {
-                        Icons.Default.Computer
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            if (isScanning) Icons.Default.WifiTethering else Icons.Default.WifiOff,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = if (isScanning) "Cihazlar Bekleniyor" else "Tarama Duraklatildi",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (isScanning)
+                        "Omarchy Linux panelini acin veya ayni yerel Wi-Fi agina baglanin ($localIp:53317)."
+                    else
+                        "Cihazlari aramak icin gorunurluk modunu acin.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onDirectIpClick,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Dogrudan IP Ekle", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PeerActionCard(
+    peer: DiscoveredPeer,
+    onTrustToggle: () -> Unit,
+    onSendFile: () -> Unit,
+    onSendMedia: () -> Unit,
+    onSendClipboard: () -> Unit
+) {
+    val isOmarchyLinux = peer.name.lowercase().contains("omarchy") || peer.name.lowercase().contains("arch") || peer.name.lowercase().contains("linux")
+    val isDesktop = isOmarchyLinux || peer.name.lowercase().contains("pc") || peer.name.lowercase().contains("laptop")
+
+    val deviceIcon = when {
+        peer.transport == "BT" -> Icons.Default.Bluetooth
+        isDesktop -> Icons.Default.Computer
+        else -> Icons.Default.PhoneAndroid
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(
+            1.dp,
+            if (peer.isTrusted) Color(0xFF10B981).copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Ust Baslik Satiri
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isOmarchyLinux) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                deviceIcon,
+                                contentDescription = null,
+                                tint = if (isOmarchyLinux) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = peer.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (peer.isTrusted) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF10B981).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "GUVENILEN",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF10B981),
+                                        fontSize = 8.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = "${peer.ip}:${peer.port} • ${peer.transport}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onTrustToggle,
+                    modifier = Modifier.size(34.dp)
+                ) {
                     Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = when (peer.transport) {
-                            "BT" -> MaterialTheme.colorScheme.onTertiaryContainer
-                            "HYBRID" -> MaterialTheme.colorScheme.onSecondaryContainer
-                            else -> MaterialTheme.colorScheme.onPrimaryContainer
-                        },
-                        modifier = Modifier.size(24.dp)
+                        if (peer.isTrusted) Icons.Default.Star else Icons.Default.StarOutline,
+                        contentDescription = "Guven Durumu",
+                        tint = if (peer.isTrusted) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = peer.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+            // Hizli Eylem Butonlari
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onSendFile,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                ) {
+                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(
-                        onClick = onToggleTrust,
-                        modifier = Modifier.size(24.dp)
-                    ) {
+                    Text("Dosya", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+
+                FilledTonalButton(
+                    onClick = onSendMedia,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Medya", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = onSendClipboard,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                ) {
+                    Icon(Icons.Default.ContentPasteGo, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Pano", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveClipboardCard(
+    preview: String,
+    targetPeer: DiscoveredPeer?,
+    onSend: () -> Unit
+) {
+    Surface(
+        onClick = onSend,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (peer.isTrusted) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = if (peer.isTrusted) "Güvenilen Cihaz" else "Güvenilir Olarak İşaretle",
-                            tint = if (peer.isTrusted) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(18.dp)
+                            Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = when (peer.transport) {
-                            "BT" -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                            "HYBRID" -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
-                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        }
-                    ) {
-                        Text(
-                            text = peer.transport,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = when (peer.transport) {
-                                "BT" -> MaterialTheme.colorScheme.tertiary
-                                "HYBRID" -> MaterialTheme.colorScheme.secondary
-                                else -> MaterialTheme.colorScheme.primary
-                            }
-                        )
-                    }
-                    if (peer.isTrusted) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFF59E0B).copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = "GÜVENİLİR",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFD97706)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
                     Text(
-                        text = if (peer.ip.startsWith("bt:")) "Bluetooth Paired" else "${peer.ip}:${peer.port}",
+                        text = "PANODAKI METIN HAZIR",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = preview,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -977,38 +890,27 @@ fun ModernPeerCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Action Buttons
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!peer.ip.startsWith("bt:")) {
-                    IconButton(
-                        onClick = onClipboardClick,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ContentCopy,
-                            contentDescription = "Pano Gönder",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-
-                FilledTonalButton(
-                    onClick = onSendClick,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.height(30.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "GÖNDER",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
+                        text = if (targetPeer != null) "${targetPeer.name}'a Isinla" else "Isinla",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        Icons.Default.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(12.dp)
                     )
                 }
             }
@@ -1017,216 +919,239 @@ fun ModernPeerCard(
 }
 
 @Composable
-fun CleanEmptyStateCard(
-    discoveryMode: DiscoveryMode,
-    onEnableScan: () -> Unit,
-    onSwitchToEveryone: () -> Unit,
-    onAddDirectIp: () -> Unit
+fun CleanBottomBar(
+    recentFilesCount: Int,
+    onRenameClick: () -> Unit,
+    onRecentFilesClick: () -> Unit
 ) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = onRenameClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Cihaz Adi", style = MaterialTheme.typography.labelSmall)
+            }
+
+            TextButton(
+                onClick = onRecentFilesClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Son Alinanlar ($recentFilesCount)", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+fun TransferStatusCard(
+    state: TransferProgressState,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            1.dp,
+            when (state) {
+                is TransferProgressState.Success -> Color(0xFF10B981)
+                is TransferProgressState.Error -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.primary
+            }
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            when (state) {
+                is TransferProgressState.Requesting -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "'${state.peerName}' cihazina transfer istegi iletiliyor...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                is TransferProgressState.WaitingConsent -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "'${state.peerName}' cihazindan onay bekleniyor...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                is TransferProgressState.Transferring -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (state.isUploading) "Gonderiliyor: ${state.fileName}" else "Aliniyor: ${state.fileName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "%${state.percent}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { state.percent / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "${NetworkUtils.formatBytes(state.bytesTransferred)} / ${NetworkUtils.formatBytes(state.totalBytes)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                is TransferProgressState.Success -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Kapat", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+                is TransferProgressState.Error -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Kapat", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentFileRow(
+    file: File,
+    onOpenFile: () -> Unit,
+    onShareFile: () -> Unit
+) {
+    Surface(
+        onClick = onOpenFile,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.size(72.dp)
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                modifier = Modifier.size(34.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        when (discoveryMode) {
-                            DiscoveryMode.OFF -> Icons.Default.WifiOff
-                            DiscoveryMode.KNOWN_PEERS -> Icons.Default.Security
-                            DiscoveryMode.EVERYONE -> Icons.Default.WifiTethering
-                        },
+                        getFileIcon(file.name),
                         contentDescription = null,
-                        tint = if (discoveryMode == DiscoveryMode.OFF) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = when (discoveryMode) {
-                    DiscoveryMode.OFF -> "Ağ Taraması Duraklatıldı"
-                    DiscoveryMode.KNOWN_PEERS -> "Kayıtlı Güvenilir Cihaz Yok"
-                    DiscoveryMode.EVERYONE -> "Yakında Cihaz Aranıyor..."
-                },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = when (discoveryMode) {
-                    DiscoveryMode.OFF -> "Cihazları görmek için görünürlüğü 'Herkes' veya 'Bilinenler' olarak açın."
-                    DiscoveryMode.KNOWN_PEERS -> "Yalnızca güvenilir olarak işaretlenen veya eşleşen cihazlar listelenir. Yakındaki tüm cihazları görmek için 'Herkes' moduna geçebilirsiniz."
-                    DiscoveryMode.EVERYONE -> "Masaüstünde OmaSend'in açık olduğundan emin olun. Cihazlar farklı ağdaysa Bluetooth eşleştirmesini kontrol edin."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 12.dp)
-            )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                when (discoveryMode) {
-                    DiscoveryMode.OFF -> {
-                        Button(
-                            onClick = onEnableScan,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Taramayı Başlat")
-                        }
-                    }
-                    DiscoveryMode.KNOWN_PEERS -> {
-                        Button(
-                            onClick = onSwitchToEveryone,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Herkes Moduna Geç")
-                        }
-                        OutlinedButton(
-                            onClick = onAddDirectIp,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Doğrudan IP Ekle")
-                        }
-                    }
-                    DiscoveryMode.EVERYONE -> {
-                        OutlinedButton(
-                            onClick = onAddDirectIp,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Doğrudan IP Ekle")
-                        }
-                    }
-                }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = NetworkUtils.formatBytes(file.length()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        }
-    }
-}
-
-@Composable
-fun RecentReceivedFilesCard(
-    files: List<File>,
-    onOpenFile: (File) -> Unit,
-    onShareFile: (File) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "SON ALINAN DOSYALAR",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 0.8.sp,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        ElevatedCard(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-            ) {
-                files.forEachIndexed { index, file ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenFile(file) }
-                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val icon = getFileIcon(file.name)
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    icon,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = file.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = NetworkUtils.formatBytes(file.length()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { onShareFile(file) },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Paylaş",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-
-                        FilledTonalButton(
-                            onClick = { onOpenFile(file) },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text("Aç", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                    if (index < files.size - 1) {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
-                    }
-                }
+            IconButton(onClick = onShareFile, modifier = Modifier.size(30.dp)) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = "Paylas",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }
@@ -1239,90 +1164,12 @@ private fun getFileIcon(filename: String): ImageVector {
         "mp4", "mkv", "mov", "avi" -> Icons.Default.PlayCircle
         "mp3", "flac", "wav", "m4a" -> Icons.Default.MusicNote
         "pdf", "doc", "docx", "txt", "md" -> Icons.Default.Description
-        "zip", "tar", "gz", "7z", "apk" -> Icons.Default.FolderZip
+        "zip", "tar", "gz", "7z", "apk", "aab" -> Icons.Default.FolderZip
         else -> Icons.Default.InsertDriveFile
     }
 }
 
-// ------------------- DİALOGLAR -------------------
-
-@Composable
-fun TargetDeviceSelectionDialog(
-    peers: List<DiscoveredPeer>,
-    onDismiss: () -> Unit,
-    onSelect: (DiscoveredPeer) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Gönderilecek Cihazı Seçin",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium
-            )
-        },
-        text = {
-            if (peers.isEmpty()) {
-                Text(
-                    text = "Şu anda yakında cihaz bulunamadı. Lütfen karşı cihazın OmaSend'i açık tuttuğundan emin olun.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(peers) { peer ->
-                        Surface(
-                            onClick = { onSelect(peer) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (peer.transport == "BT") Icons.Default.Bluetooth else Icons.Default.Computer,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = peer.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "${peer.ip} • ${peer.transport}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Icon(
-                                    Icons.Default.ArrowForward,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("İptal")
-            }
-        }
-    )
-}
+// ------------------- DİYALOGLAR -------------------
 
 @Composable
 fun RenameDeviceDialog(
@@ -1335,15 +1182,12 @@ fun RenameDeviceDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = "Cihaz Adını Değiştir",
-                fontWeight = FontWeight.Bold
-            )
+            Text(text = "Cihaz Adini Duzenle", fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
                 Text(
-                    text = "Bu ad yakındaki cihazların ekranında görüntülenecektir:",
+                    text = "Bu ad yakindaki Omarchy ve OmaSend cihazlarina gorunecektir:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1352,9 +1196,9 @@ fun RenameDeviceDialog(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    label = { Text("Cihaz Adı") },
+                    label = { Text("Cihaz Adi") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
             }
         },
@@ -1371,7 +1215,7 @@ fun RenameDeviceDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("İptal")
+                Text("Iptal")
             }
         }
     )
@@ -1387,7 +1231,7 @@ fun IncomingTransferDialog(
         onDismissRequest = onDecline,
         icon = {
             Icon(
-                Icons.Default.Share,
+                Icons.Default.Security,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(32.dp)
@@ -1395,7 +1239,7 @@ fun IncomingTransferDialog(
         },
         title = {
             Text(
-                text = "Dosya Aktarım İsteği",
+                text = "Dosya Aktarim Istegi",
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
@@ -1406,48 +1250,78 @@ fun IncomingTransferDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "'${prompt.senderName}' cihazından dosya gönderilmek isteniyor:",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "'${prompt.senderName}' (${prompt.senderIp}) cihazi size dosya gondermek istiyor:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(12.dp))
+
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         prompt.files.forEach { file ->
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
                                     text = file.name,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.weight(1f),
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     text = NetworkUtils.formatBytes(file.size_bytes),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Toplam Boyut",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = NetworkUtils.formatBytes(prompt.totalSizeBytes),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = onAccept) {
-                Text("Kabul Et")
+            Button(
+                onClick = onAccept,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+            ) {
+                Text("Kabul Et", color = Color.White)
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDecline) {
+            OutlinedButton(
+                onClick = onDecline,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+            ) {
                 Text("Reddet")
             }
         }
@@ -1455,162 +1329,25 @@ fun IncomingTransferDialog(
 }
 
 @Composable
-fun TransferStatusCard(
-    state: TransferProgressState,
-    onDismiss: () -> Unit
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            when (state) {
-                is TransferProgressState.Requesting -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "'${state.peerName}' cihazına istek gönderiliyor...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                is TransferProgressState.WaitingConsent -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "'${state.peerName}' onayı bekleniyor...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                is TransferProgressState.Transferring -> {
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = state.fileName,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = "%${state.percent}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { state.percent / 100f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "${NetworkUtils.formatBytes(state.bytesTransferred)} / ${NetworkUtils.formatBytes(state.totalBytes)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                is TransferProgressState.Success -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = state.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Kapat", modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-                is TransferProgressState.Error -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = state.message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Kapat", modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-                else -> {}
-            }
-        }
-    }
-}
-
-@Composable
 fun QrCodeDialog(
     context: Context,
     onDismiss: () -> Unit
 ) {
-    val endpointUrl = "http://${NetworkUtils.getLocalIpAddress()}:53317"
+    val localIp = NetworkUtils.getLocalIpAddress()
+    val endpointUrl = "http://$localIp:${NetworkUtils.PORT}"
+
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(endpointUrl) {
-        withContext(Dispatchers.Default) {
-            try {
-                val writer = QRCodeWriter()
-                val bitMatrix = writer.encode(endpointUrl, BarcodeFormat.QR_CODE, 512, 512)
-                val width = bitMatrix.width
-                val height = bitMatrix.height
-                val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-                for (x in 0 until width) {
-                    for (y in 0 until height) {
-                        bmp.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-                    }
-                }
-                qrBitmap = bmp
-            } catch (_: Exception) {
-            }
+        withContext(Dispatchers.IO) {
+            qrBitmap = TransferBridge.generateQrCode(endpointUrl, 512)
         }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "Web İndirme Portalı (QR)", fontWeight = FontWeight.Bold)
+            Text(text = "Web Indirme Portali (QR)", fontWeight = FontWeight.Bold)
         },
         text = {
             Column(
@@ -1618,18 +1355,18 @@ fun QrCodeDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Aynı ağdaki herhangi bir cihaz (iPhone, Mac, Windows veya PC) tarayıcıyla bu kodu okutarak bağlanabilir:",
+                    text = "Ayni agdaki herhangi bir tarayicidan bu kodu okutarak dogrudan baglanabilirsiniz:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = Color.White,
                     modifier = Modifier.size(200.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(12.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(10.dp)) {
                         if (qrBitmap != null) {
                             Image(
                                 bitmap = qrBitmap!!.asImageBitmap(),
@@ -1644,7 +1381,7 @@ fun QrCodeDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1663,7 +1400,7 @@ fun QrCodeDialog(
                             onClick = {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                 clipboard?.setPrimaryClip(ClipData.newPlainText("OmaSend Endpoint", endpointUrl))
-                                Toast.makeText(context, "URL kopyalandı", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "URL kopyalandi", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -1675,7 +1412,7 @@ fun QrCodeDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Text("Tamam")
+                Text("Kapat")
             }
         }
     )
@@ -1692,12 +1429,12 @@ fun DirectIpDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "Doğrudan IP ile Bağlan", fontWeight = FontWeight.Bold)
+            Text(text = "Dogrudan IP ile Baglan", fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
                 Text(
-                    text = "Hedef cihazın IP adresini girin:",
+                    text = "Hedef Omarchy veya OmaSend cihazinin IP adresini girin:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1705,19 +1442,19 @@ fun DirectIpDialog(
                 OutlinedTextField(
                     value = ipText,
                     onValueChange = { ipText = it },
-                    label = { Text("IP Adresi (örn. 192.168.1.50)") },
+                    label = { Text("IP Adresi (orn. 192.168.1.50)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = portText,
                     onValueChange = { portText = it },
-                    label = { Text("Port") },
+                    label = { Text("Port (Varsayilan: 53317)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
             }
         },
@@ -1731,12 +1468,12 @@ fun DirectIpDialog(
                 },
                 enabled = ipText.trim().isNotEmpty()
             ) {
-                Text("Bağlan")
+                Text("Baglan")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("İptal")
+                Text("Iptal")
             }
         }
     )
@@ -1747,28 +1484,29 @@ fun InfoDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "OmaSend Hakkında", fontWeight = FontWeight.Bold)
+            Text(text = "OmaSend Guvenlik & Bilgi", fontWeight = FontWeight.Bold)
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "OmaSend v1.0.3",
+                    text = "OmaSend v1.3.1",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Omarchy Linux & Android Hibrit Paylaşım Ekosistemi",
+                    text = "Omarchy Linux & Android Hibrit Paylasim Ekosistemi",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(12.dp))
-                InfoDialogRow("Ağ Protokolü", "P2P AirBridge + UDP Beacon (53317)")
-                InfoDialogRow("Çevrimdışı Taşıma", "Bluetooth OBEX Push (OPP)")
-                InfoDialogRow("Şifreleme & Bütünlük", "SHA-256 Checksum + Token Auth")
-                InfoDialogRow("Geliştirici", "Ozan Özdil (Omarchy Linux)")
+                InfoDialogRow("Ag Protokolu", "P2P AirBridge + UDP Beacon (53317)")
+                InfoDialogRow("Kriptografi", "BLAKE3 + SHA-256 + Ephemeral Token")
+                InfoDialogRow("Bellek Guvenligi", "RAM Anti-Forensics Zeroization")
+                InfoDialogRow("Cevrimdisi", "Bluetooth OBEX Push (OPP)")
+                InfoDialogRow("Gelistirici", "Ozan Ozdil (Omarchy Ecosystem)")
             }
         },
         confirmButton = {
@@ -1792,7 +1530,7 @@ fun InfoDialogRow(label: String, value: String) {
     }
 }
 
-// ------------------- AKTARIM FONKSİYONLARI -------------------
+// ------------------- AKTARIM VE DOSYA ISLEMLERI -------------------
 
 suspend fun sendMultipleUrisToPeer(
     context: Context,
@@ -1832,7 +1570,7 @@ suspend fun sendFileUriToPeer(
                 fileSize = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() } ?: 0L
             }
 
-            // Bluetooth direct transfer
+            // Bluetooth dogrudan aktarim
             if (peer.transport == "BT" || peer.ip.startsWith("bt:")) {
                 withContext(Dispatchers.Main) {
                     onState(TransferProgressState.Transferring(
@@ -1869,12 +1607,11 @@ suspend fun sendFileUriToPeer(
                     }
                     if (obexResult.isSuccess) {
                         withContext(Dispatchers.Main) {
-                            onState(TransferProgressState.Success("'$fileName' Bluetooth ile aktarıldı!"))
+                            onState(TransferProgressState.Success("'$fileName' Bluetooth ile aktarildi!"))
                         }
                         return@withContext
                     }
                 }
-                // Fallback to system Bluetooth sharing if direct RFCOMM could not connect
                 withContext(Dispatchers.Main) {
                     onState(TransferProgressState.Idle)
                     TransferBridge.sendViaBluetooth(context, listOf(uri), targetMac = btMac)
@@ -1883,6 +1620,7 @@ suspend fun sendFileUriToPeer(
             }
 
             withContext(Dispatchers.Main) {
+                OmaSendHaptics.performTransferStart(context)
                 onState(TransferProgressState.Requesting(peer.name, fileName))
             }
 
@@ -1904,7 +1642,7 @@ suspend fun sendFileUriToPeer(
                 if (peer.transport == "HYBRID" || peer.fingerprint.isNotEmpty() || peer.ip.startsWith("bt:")) {
                     val btMac = peer.fingerprint.ifEmpty { peer.ip }
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Wi-Fi yanıt vermedi. Bluetooth ile aktarılıyor...", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Wi-Fi yanit vermedi. Bluetooth ile aktariliyor...", Toast.LENGTH_SHORT).show()
                         onState(TransferProgressState.Transferring(
                             isUploading = true,
                             peerName = peer.name,
@@ -1938,7 +1676,7 @@ suspend fun sendFileUriToPeer(
                         }
                         if (obexResult.isSuccess) {
                             withContext(Dispatchers.Main) {
-                                onState(TransferProgressState.Success("'$fileName' Bluetooth ile aktarıldı!"))
+                                onState(TransferProgressState.Success("'$fileName' Bluetooth ile aktarildi!"))
                             }
                             return@withContext
                         }
@@ -1950,7 +1688,7 @@ suspend fun sendFileUriToPeer(
                     return@withContext
                 }
                 withContext(Dispatchers.Main) {
-                    onState(TransferProgressState.Error(it.message ?: "Transfer isteği başarısız oldu"))
+                    onState(TransferProgressState.Error(it.message ?: "Transfer istegi basarisiz oldu"))
                 }
                 return@withContext
             }
@@ -1970,7 +1708,7 @@ suspend fun sendFileUriToPeer(
             val inputStream = context.contentResolver.openInputStream(uri)
             if (inputStream == null) {
                 withContext(Dispatchers.Main) {
-                    onState(TransferProgressState.Error("Dosya akışı açılamadı"))
+                    onState(TransferProgressState.Error("Dosya akisi acilamadi"))
                 }
                 return@withContext
             }
@@ -1992,14 +1730,17 @@ suspend fun sendFileUriToPeer(
 
             withContext(Dispatchers.Main) {
                 if (uploadResult.isSuccess) {
-                    onState(TransferProgressState.Success("'$fileName' başarıyla gönderildi!"))
+                    OmaSendHaptics.performTransferSuccess(context)
+                    onState(TransferProgressState.Success("'$fileName' basariyla gonderildi!"))
                 } else {
-                    onState(TransferProgressState.Error(uploadResult.exceptionOrNull()?.message ?: "Yükleme başarısız"))
+                    OmaSendHaptics.performTransferError(context)
+                    onState(TransferProgressState.Error(uploadResult.exceptionOrNull()?.message ?: "Yukleme basarisiz"))
                 }
             }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) {
-                onState(TransferProgressState.Error(e.message ?: "Transfer hatası"))
+                OmaSendHaptics.performTransferError(context)
+                onState(TransferProgressState.Error(e.message ?: "Transfer hatasi"))
             }
         }
     }
@@ -2013,18 +1754,32 @@ suspend fun sendClipboardToPeer(
 ) {
     if (peer.transport == "BT" || peer.ip.startsWith("bt:")) {
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Pano senkronizasyonu yalnızca Wi-Fi (LAN) bağlantısıyla desteklenir.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Pano senkronizasyonu yalnizca Wi-Fi (LAN) baglantisiyla desteklenir.", Toast.LENGTH_SHORT).show()
         }
         return
     }
 
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     val clip = clipboard?.primaryClip
+
+    val description = clip?.description
+    val isSensitive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        description?.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false) ?: false
+    } else {
+        false
+    }
+    if (isSensitive) {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Hassas veri kalkani: Parola veya ozel icerikler aga aktarilmaz.", Toast.LENGTH_LONG).show()
+        }
+        return
+    }
+
     val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
 
     if (text.isNullOrEmpty()) {
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Telefon panosu boş! Önce bir metin kopyalayın.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Telefon panosu bos! Once bir metin kopyalayin.", Toast.LENGTH_SHORT).show()
         }
         return
     }
@@ -2033,9 +1788,9 @@ suspend fun sendClipboardToPeer(
         val result = app.client.sendClipboard(peer.ip, peer.port, text)
         withContext(Dispatchers.Main) {
             if (result.isSuccess) {
-                Toast.makeText(context, "Pano metni '${peer.name}' cihazına aktarıldı!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Pano metni '${peer.name}' cihazina aktarildi!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "Pano aktarılamadı: ${result.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Pano aktarilamadi: ${result.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -2044,8 +1799,6 @@ suspend fun sendClipboardToPeer(
 private fun scopeLaunchMain(block: () -> Unit) {
     android.os.Handler(android.os.Looper.getMainLooper()).post(block)
 }
-
-// ------------------- DOSYA YARDIMCILARI -------------------
 
 fun getRecentReceivedFiles(): List<File> {
     return try {
@@ -2079,7 +1832,7 @@ fun openFileWithSystem(context: Context, file: File) {
         }
         context.startActivity(intent)
     } catch (e: Exception) {
-        Toast.makeText(context, "Dosya açılamadı: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Dosya acilamadi: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2097,9 +1850,9 @@ fun shareFileWithSystem(context: Context, file: File) {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Dosyayı Paylaş"))
+        context.startActivity(Intent.createChooser(intent, "Dosyayi Paylas"))
     } catch (e: Exception) {
-        Toast.makeText(context, "Paylaşılamadı: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Paylasilamadi: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2111,12 +1864,11 @@ fun PeerCard(
     onSendFile: () -> Unit = {},
     onSendClipboard: () -> Unit = {}
 ) {
-    ModernPeerCard(
+    PeerActionCard(
         peer = peer,
-        isSelected = isSelected,
-        onCardClick = onClick,
-        onSendClick = onSendFile,
-        onClipboardClick = onSendClipboard
+        onTrustToggle = {},
+        onSendFile = onSendFile,
+        onSendMedia = onSendFile,
+        onSendClipboard = onSendClipboard
     )
 }
-
