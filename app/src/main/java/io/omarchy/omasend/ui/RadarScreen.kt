@@ -1833,7 +1833,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            text = "OmaSend v1.3.3 (27)",
+                            text = "OmaSend v${io.omarchy.omasend.BuildConfig.VERSION_NAME} (${io.omarchy.omasend.BuildConfig.VERSION_CODE})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

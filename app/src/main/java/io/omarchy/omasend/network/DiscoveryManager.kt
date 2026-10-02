@@ -20,8 +20,13 @@ import kotlinx.serialization.json.Json
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class DiscoveryManager(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -102,18 +107,27 @@ class DiscoveryManager(private val context: Context) {
         return paired.any { OmaIdentity.unformat(it) == clean }
     }
 
-    fun addPairedOmaId(omaId: String) {
+    fun addPairedOmaId(omaId: String, name: String? = null, ip: String? = null) {
         if (!OmaIdentity.isValid(omaId)) return
         val formatted = OmaIdentity.format(omaId)
+        val clean = OmaIdentity.unformat(omaId)
         val current = getPairedOmaIds().toMutableSet()
         current.add(formatted)
-        pairedPrefs.edit().putStringSet(KEY_PAIRED_OMA_IDS, current).apply()
+        val editor = pairedPrefs.edit().putStringSet(KEY_PAIRED_OMA_IDS, current)
+        if (!name.isNullOrBlank()) {
+            editor.putString("name_$clean", name.trim())
+        }
+        if (!ip.isNullOrBlank()) {
+            editor.putString("ip_$clean", ip.trim())
+        }
+        editor.apply()
 
         // Update all discovered peers matching this OmaID
-        val clean = OmaIdentity.unformat(omaId)
         for ((id, peer) in peerMap) {
             if (OmaIdentity.unformat(peer.omaId) == clean || OmaIdentity.unformat(peer.fingerprint) == clean) {
-                peerMap[id] = peer.copy(isTrusted = true, omaId = formatted)
+                val updatedName = if (!name.isNullOrBlank()) name.trim() else peer.name
+                val updatedIp = if (!ip.isNullOrBlank()) ip.trim() else peer.ip
+                peerMap[id] = peer.copy(isTrusted = true, omaId = formatted, name = updatedName, ip = updatedIp)
             }
         }
         updatePeersFlow()
@@ -121,9 +135,14 @@ class DiscoveryManager(private val context: Context) {
 
     fun removePairedOmaId(omaId: String) {
         val formatted = OmaIdentity.format(omaId)
+        val clean = OmaIdentity.unformat(omaId)
         val current = getPairedOmaIds().toMutableSet()
         current.remove(formatted)
-        pairedPrefs.edit().putStringSet(KEY_PAIRED_OMA_IDS, current).apply()
+        pairedPrefs.edit()
+            .putStringSet(KEY_PAIRED_OMA_IDS, current)
+            .remove("name_$clean")
+            .remove("ip_$clean")
+            .apply()
         updatePeersFlow()
     }
 
@@ -174,17 +193,18 @@ class DiscoveryManager(private val context: Context) {
                 }
                 if (!alreadyDiscovered) {
                     val savedName = pairedPrefs.getString("name_$cleanP", null) ?: "Eşleşmiş Cihaz"
+                    val savedIp = pairedPrefs.getString("ip_$cleanP", null) ?: ""
                     activeList.add(
                         DiscoveredPeer(
                             id = "paired_$cleanP",
                             name = savedName,
-                            ip = "",
+                            ip = savedIp,
                             port = NetworkUtils.PORT,
                             transport = "OMAID",
                             omaId = OmaIdentity.format(pId),
                             fingerprint = OmaIdentity.format(pId),
                             isTrusted = true,
-                            lastSeen = 0L // offline / standby indicator
+                            lastSeen = if (savedIp.isNotBlank()) 1L else 0L // Keep reachable if IP known
                         )
                     )
                 }
@@ -197,10 +217,13 @@ class DiscoveryManager(private val context: Context) {
     }
 
     private fun sendBroadcastPacket(socket: DatagramSocket, payload: ByteArray, port: Int) {
+        val sentAddrs = mutableSetOf<String>()
+
         // 1. Global Broadcast
         try {
             val bcastAddr = InetAddress.getByName("255.255.255.255")
             socket.send(DatagramPacket(payload, payload.size, bcastAddr, port))
+            sentAddrs.add("255.255.255.255")
         } catch (_: Exception) {}
 
         // 2. Subnet Broadcast on all active network interfaces
@@ -213,12 +236,48 @@ class DiscoveryManager(private val context: Context) {
                     val bcast = addr.broadcast
                     if (bcast != null) {
                         try {
-                            socket.send(DatagramPacket(payload, payload.size, bcast, port))
+                            val host = bcast.hostAddress ?: ""
+                            if (host.isNotBlank() && sentAddrs.add(host)) {
+                                socket.send(DatagramPacket(payload, payload.size, bcast, port))
+                            }
                         } catch (_: Exception) {}
                     }
                 }
             }
         } catch (_: Exception) {}
+
+        // 3. Derived Subnet Broadcasts (/24 and /16) from current local IP
+        try {
+            val localIp = NetworkUtils.getLocalIpAddress()
+            val parts = localIp.split('.')
+            if (parts.size == 4) {
+                val sub24 = "${parts[0]}.${parts[1]}.${parts[2]}.255"
+                if (sentAddrs.add(sub24)) {
+                    try {
+                        socket.send(DatagramPacket(payload, payload.size, InetAddress.getByName(sub24), port))
+                    } catch (_: Exception) {}
+                }
+                val sub16 = "${parts[0]}.${parts[1]}.255.255"
+                if (sentAddrs.add(sub16)) {
+                    try {
+                        socket.send(DatagramPacket(payload, payload.size, InetAddress.getByName(sub16), port))
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 4. Send Unicast directly to all recorded paired peer IPs
+        val pairedIds = getPairedOmaIds()
+        for (pId in pairedIds) {
+            val clean = OmaIdentity.unformat(pId)
+            val savedIp = pairedPrefs.getString("ip_$clean", null)
+            if (!savedIp.isNullOrBlank() && sentAddrs.add(savedIp)) {
+                try {
+                    val peerAddr = InetAddress.getByName(savedIp)
+                    socket.send(DatagramPacket(payload, payload.size, peerAddr, port))
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun getMyOmaId(): String {
@@ -264,7 +323,37 @@ class DiscoveryManager(private val context: Context) {
                 } catch (_: Exception) {
                 }
             }
+            // Probe paired peers to refresh reachable IP if on local Wi-Fi
+            probePairedPeersOnLocalNetwork()
             updatePeersFlow()
+        }
+    }
+
+    private fun probePairedPeersOnLocalNetwork() {
+        val pairedIds = getPairedOmaIds()
+        if (pairedIds.isEmpty()) return
+        val localIp = NetworkUtils.getLocalIpAddress()
+        if (localIp == "127.0.0.1") return
+
+        // 1. Try recorded IP first
+        for (pId in pairedIds) {
+            val clean = OmaIdentity.unformat(pId)
+            val savedIp = pairedPrefs.getString("ip_$clean", null)
+            if (!savedIp.isNullOrBlank()) {
+                scope.launch {
+                    try {
+                        val sock = Socket()
+                        sock.connect(InetSocketAddress(savedIp, NetworkUtils.PORT), 800)
+                        sock.close()
+                        // Socket connected, mark as active
+                        val current = peerMap["paired_$clean"]
+                        if (current != null) {
+                            peerMap["paired_$clean"] = current.copy(lastSeen = System.currentTimeMillis(), ip = savedIp)
+                            updatePeersFlow()
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
@@ -461,6 +550,14 @@ class DiscoveryManager(private val context: Context) {
 
                                     val senderIp = packetAddr.hostAddress ?: beacon.ip
                                     val isPaired = isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
+
+                                    if (isOmaIdPaired(peerOmaId) && senderIp.isNotBlank()) {
+                                        val clean = OmaIdentity.unformat(peerOmaId)
+                                        pairedPrefs.edit()
+                                            .putString("ip_$clean", senderIp)
+                                            .putString("name_$clean", beacon.name)
+                                            .apply()
+                                    }
 
                                     val peer = DiscoveredPeer(
                                         id = beacon.id,
