@@ -1,4 +1,4 @@
-name: Build & Release Android APK
+name: Build & Release Android
 
 on:
   push:
@@ -31,21 +31,25 @@ jobs:
       - name: Run Unit Tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build Debug APK & Release Bundle
+        run: ./gradlew assembleDebug bundleRelease --stacktrace
 
-      - name: Prepare APK Artifact
+      - name: Prepare Artifacts
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk omasend-v1.0.3.apk
+          mkdir -p dist_artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk dist_artifacts/omasend-android.apk
+          cp app/build/outputs/bundle/release/app-release.aab dist_artifacts/omasend-android.aab
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: omasend-apk
-          path: omasend-v1.0.3.apk
+          name: omasend-android-build
+          path: dist_artifacts/*
 
-      - name: Upload APK to Release
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          files: omasend-v1.0.3.apk
+          files: |
+            dist_artifacts/omasend-android.apk
+            dist_artifacts/omasend-android.aab
