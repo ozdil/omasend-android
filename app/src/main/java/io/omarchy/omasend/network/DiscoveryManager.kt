@@ -335,23 +335,26 @@ class DiscoveryManager(private val context: Context) {
         val localIp = NetworkUtils.getLocalIpAddress()
         if (localIp == "127.0.0.1") return
 
-        // 1. Try recorded IP first
+        // Probe recorded IPs concurrently with bounded parallelism
+        val probeDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(16)
         for (pId in pairedIds) {
             val clean = OmaIdentity.unformat(pId)
             val savedIp = pairedPrefs.getString("ip_$clean", null)
             if (!savedIp.isNullOrBlank()) {
-                scope.launch {
+                scope.launch(probeDispatcher) {
+                    var sock: Socket? = null
                     try {
-                        val sock = Socket()
-                        sock.connect(InetSocketAddress(savedIp, NetworkUtils.PORT), 800)
-                        sock.close()
-                        // Socket connected, mark as active
+                        sock = Socket()
+                        sock.connect(InetSocketAddress(savedIp, NetworkUtils.PORT), 600)
                         val current = peerMap["paired_$clean"]
                         if (current != null) {
                             peerMap["paired_$clean"] = current.copy(lastSeen = System.currentTimeMillis(), ip = savedIp)
                             updatePeersFlow()
                         }
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    } finally {
+                        try { sock?.close() } catch (_: Exception) {}
+                    }
                 }
             }
         }
@@ -514,9 +517,11 @@ class DiscoveryManager(private val context: Context) {
                 socket = DatagramSocket(NetworkUtils.PORT).apply {
                     broadcast = true
                     reuseAddress = true
+                    soTimeout = 2000 // Non-blocking periodic check for isActive
                 }
                 val buffer = ByteArray(2048)
                 val packet = DatagramPacket(buffer, buffer.size)
+                val magicBytes = "OMASEND_P2P".toByteArray(Charsets.UTF_8)
 
                 while (isActive) {
                     try {
@@ -525,7 +530,17 @@ class DiscoveryManager(private val context: Context) {
                         if (packetAddr == null || !NetworkUtils.isPrivateOrLocalAddress(packetAddr)) continue
 
                         val length = packet.length
-                        if (length > 0) {
+                        // Early magic byte filtering to avoid heavy String & JSON allocation on stray network noise
+                        if (length > magicBytes.size) {
+                            var matchesMagic = true
+                            for (i in magicBytes.indices) {
+                                if (packet.data[i] != magicBytes[i]) {
+                                    matchesMagic = false
+                                    break
+                                }
+                            }
+                            if (!matchesMagic) continue
+
                             val rawJson = String(packet.data, 0, length, Charsets.UTF_8)
                             val beacon = json.decodeFromString<P2pBeaconPacket>(rawJson)
                             if (beacon.magic == "OMASEND_P2P") {
@@ -576,6 +591,8 @@ class DiscoveryManager(private val context: Context) {
                                 }
                             }
                         }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        // Periodic loop timeout to check isActive, continue safely
                     } catch (_: Exception) {
                     }
                 }
