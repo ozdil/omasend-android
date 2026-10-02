@@ -427,7 +427,7 @@ fun RadarScreen(
                 }
             }
 
-            // 6. Son Alınan Dosyalar (Ekstra Kolaylık Özelliği)
+            // 5. Son Alınan Dosyalar (Ekstra Kolaylık Özelliği)
             if (recentFiles.isNotEmpty()) {
                 item {
                     RecentReceivedFilesCard(
