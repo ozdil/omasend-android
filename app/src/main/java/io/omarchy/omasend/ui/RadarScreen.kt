@@ -284,6 +284,22 @@ fun RadarScreen(
                 )
             )
         },
+        bottomBar = {
+            StealthActionDock(
+                selectedPeer = selectedPeer,
+                onSendFiles = {
+                    filePickerLauncher.launch("*/*")
+                },
+                onSendMedia = {
+                    mediaPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
+                onQuickDrop = {
+                    showQrDialog = true
+                }
+            )
+        },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         LazyColumn(
@@ -294,11 +310,12 @@ fun RadarScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            // 1. OmaID Kimlik Kapsülü ve Ağ Durumu
+            // 1. Model 5 (Stealth AirBridge): Kompakt OmaID Dinamik Kapsülü (Dynamic Pill)
             item {
-                OmaIdCapsuleCard(
+                StealthDynamicPill(
                     identity = omaIdentity,
                     wanStatus = wanStatus,
+                    discoveryMode = discoveryMode,
                     onCopyId = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                         val clip = ClipData.newPlainText("OmaID", omaIdentity.formattedId)
@@ -308,44 +325,32 @@ fun RadarScreen(
                     onShowQr = { showOmaIdQrDialog = true },
                     onScanQr = { showQrScannerDialog = true },
                     onEditId = { showEditOmaIdDialog = true },
-                    onResetId = { showResetOmaIdConfirmDialog = true },
-                    onNetworkStatusClick = { showNetworkStatusDialog = true }
-                )
-            }
-
-            // 2. Cihazım ve Görünürlük Kartı
-            item {
-                LocalDeviceHeroCard(
-                    context = context,
-                    currentMode = discoveryMode,
-                    onModeSelected = { newMode ->
-                        app.discoveryManager.setMode(newMode)
-                        if (newMode == DiscoveryMode.OFF) {
+                    onNetworkStatusClick = { showNetworkStatusDialog = true },
+                    onCycleMode = {
+                        val nextMode = when (discoveryMode) {
+                            DiscoveryMode.OFF -> DiscoveryMode.EVERYONE
+                            DiscoveryMode.EVERYONE -> DiscoveryMode.KNOWN_PEERS
+                            DiscoveryMode.KNOWN_PEERS -> DiscoveryMode.OFF
+                        }
+                        app.discoveryManager.setMode(nextMode)
+                        if (nextMode == DiscoveryMode.OFF) {
                             OmaSendForegroundService.stopService(context)
                             Toast.makeText(context, "Görünürlük kapatıldı", Toast.LENGTH_SHORT).show()
                         } else {
                             OmaSendForegroundService.startService(context)
-                            val msg = if (newMode == DiscoveryMode.KNOWN_PEERS) {
-                                "Yalnızca bilinen ve eşleşmiş cihazlar taranıyor"
-                            } else {
-                                "Görünürlük: Herkese Açık (10 dk)"
-                            }
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Görünürlük: ${nextMode.name}", Toast.LENGTH_SHORT).show()
                         }
-                    },
-                    onRename = { showRenameDialog = true }
+                    }
                 )
             }
 
-            // 2. Hızlı Gönderim Butonları (Kullanımı Kolaylaştıran Hub)
+            // 2. Model 5: Su Dalgası Nabız Radarı ve Cihaz Durum Başlığı
             item {
-                QuickSendHubCard(
-                    onPickFiles = { filePickerLauncher.launch("*/*") },
-                    onPickMedia = {
-                        mediaPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                        )
-                    },
+                StealthRadarHero(
+                    context = context,
+                    isScanning = discoveryMode != DiscoveryMode.OFF,
+                    peerCount = peers.size,
+                    onRename = { showRenameDialog = true },
                     onShowWebPortal = { showQrDialog = true }
                 )
             }
@@ -436,6 +441,11 @@ fun RadarScreen(
                         onShareFile = { file -> shareFileWithSystem(context, file) }
                     )
                 }
+            }
+
+            // Alt Dock için Boşluk
+            item {
+                Spacer(modifier = Modifier.height(72.dp))
             }
         }
     }
@@ -2160,6 +2170,359 @@ fun getDeviceTypeBadge(senderName: String): String {
 
 
 
+
+// ------------------- MODEL 5: STEALTH AIRBRIDGE BİLEŞENLERİ (OMARCHY X APPLE) -------------------
+
+@Composable
+fun StealthDynamicPill(
+    identity: OmaIdentity,
+    wanStatus: WanStatus,
+    discoveryMode: DiscoveryMode,
+    onCopyId: () -> Unit,
+    onShowQr: () -> Unit,
+    onScanQr: () -> Unit,
+    onEditId: () -> Unit,
+    onNetworkStatusClick: () -> Unit,
+    onCycleMode: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Sol: Kimlik Rozeti ve Maskeli/Açık OmaID
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onCopyId)
+                    .padding(vertical = 4.dp, horizontal = 4.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = identity.formattedId,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        letterSpacing = 0.8.sp
+                    )
+                    Text(
+                        text = "OmaID • Dokun Kopyala",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            // Sağ: Aksiyon Hapları (QR, Tara, Ağ Rozeti)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Ağ Durum Hapı
+                NetworkStatusBadge(
+                    wanStatus = wanStatus,
+                    onClick = onNetworkStatusClick
+                )
+
+                // Görünürlük Modu Rozeti
+                Surface(
+                    onClick = onCycleMode,
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981).copy(alpha = 0.4f) else Color.Transparent)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981) else Color.Gray)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = when (discoveryMode) {
+                                DiscoveryMode.EVERYONE -> "Herkes"
+                                DiscoveryMode.KNOWN_PEERS -> "Eşler"
+                                DiscoveryMode.OFF -> "Kapalı"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (discoveryMode != DiscoveryMode.OFF) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // QR Göster
+                Surface(
+                    onClick = onShowQr,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.QrCode,
+                            contentDescription = "QR Kodum",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // QR Tara / Eşle
+                Surface(
+                    onClick = onScanQr,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.QrCodeScanner,
+                            contentDescription = "Cihaz Eşle",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StealthRadarHero(
+    context: Context,
+    isScanning: Boolean,
+    peerCount: Int,
+    onRename: () -> Unit,
+    onShowWebPortal: () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), RoundedCornerShape(22.dp)),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Su Dalgası Dinamik Nabız Radarı
+            RadarPulseAvatar(isScanning = isScanning)
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = NetworkUtils.getDeviceName(context),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = onRename,
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Cihaz Adı",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${NetworkUtils.getLocalIpAddress()}:53317 • ${if (isScanning) "$peerCount aktif eş" else "Pasif"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontSize = 11.sp
+                )
+            }
+
+            // Web İndirme Portalı QR Butonu
+            Surface(
+                onClick = onShowWebPortal,
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Public,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Web Portal",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StealthActionDock(
+    selectedPeer: DiscoveredPeer?,
+    onSendFiles: () -> Unit,
+    onSendMedia: () -> Unit,
+    onQuickDrop: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Primer Buton: DOSYA / BELGE GÖNDER (Fitts Altın Alan - %55 Ağırlık)
+            Button(
+                onClick = onSendFiles,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .weight(1.3f)
+                    .height(52.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp)
+            ) {
+                Icon(
+                    Icons.Default.Send,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = if (selectedPeer != null) "GÖNDER: ${selectedPeer.name.take(10)}" else "DOSYA GÖNDER",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Tüm Dosya Türleri",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            // Sekonder Buton: MEDYA / GALERİ (%45 Ağırlık)
+            FilledTonalButton(
+                onClick = onSendMedia,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp)
+            ) {
+                Icon(
+                    Icons.Default.Image,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Column {
+                    Text(
+                        text = "GALERİ",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Fotoğraf & Video",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Hızlı Paylaşım / Web QR Kapsülü
+            Surface(
+                onClick = onQuickDrop,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.size(52.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.QrCode,
+                        contentDescription = "Hızlı QR",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    }
+}
 
 // ------------------- OMAID VE AĞ DURUMU BİLEŞENLERİ -------------------
 
