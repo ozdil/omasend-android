@@ -146,7 +146,10 @@ class DiscoveryManager(private val context: Context) {
 
     private fun updatePeersFlow() {
         val mode = _discoveryMode.value
-        val list = when (mode) {
+        val myOmaId = getMyOmaId()
+        val cleanMyOmaId = OmaIdentity.unformat(myOmaId)
+
+        val activeList = when (mode) {
             DiscoveryMode.OFF -> emptyList()
             DiscoveryMode.KNOWN_PEERS -> {
                 peerMap.values.filter { it.isTrusted || isOmaIdPaired(it.omaId) || it.id.startsWith("manual_") || it.transport == "DIRECT" }
@@ -154,8 +157,43 @@ class DiscoveryManager(private val context: Context) {
             DiscoveryMode.EVERYONE -> {
                 peerMap.values.toList()
             }
+        }.filter { peer ->
+            // Filter out self device or self OmaID
+            val cleanPeerOma = OmaIdentity.unformat(peer.omaId)
+            !(cleanMyOmaId.isNotBlank() && cleanPeerOma == cleanMyOmaId)
+        }.toMutableList()
+
+        // Also add paired OmaIDs that are not currently in activeList as offline/paired devices
+        if (mode != DiscoveryMode.OFF) {
+            val pairedIds = getPairedOmaIds()
+            for (pId in pairedIds) {
+                val cleanP = OmaIdentity.unformat(pId)
+                if (cleanP.isBlank() || cleanP == cleanMyOmaId) continue
+                val alreadyDiscovered = activeList.any { 
+                    OmaIdentity.unformat(it.omaId) == cleanP || OmaIdentity.unformat(it.fingerprint) == cleanP 
+                }
+                if (!alreadyDiscovered) {
+                    val savedName = pairedPrefs.getString("name_$cleanP", null) ?: "Eşleşmiş Cihaz"
+                    activeList.add(
+                        DiscoveredPeer(
+                            id = "paired_$cleanP",
+                            name = savedName,
+                            ip = "",
+                            port = NetworkUtils.PORT,
+                            transport = "OMAID",
+                            omaId = OmaIdentity.format(pId),
+                            fingerprint = OmaIdentity.format(pId),
+                            isTrusted = true,
+                            lastSeen = 0L // offline / standby indicator
+                        )
+                    )
+                }
+            }
         }
-        _peers.value = list.sortedBy { it.name }
+
+        _peers.value = activeList.sortedWith(compareByDescending<DiscoveredPeer> { it.isTrusted }
+            .thenByDescending { it.lastSeen > 0L }
+            .thenBy { it.name })
     }
 
     private fun sendBroadcastPacket(socket: DatagramSocket, payload: ByteArray, port: Int) {
@@ -404,7 +442,14 @@ class DiscoveryManager(private val context: Context) {
                             if (beacon.magic == "OMASEND_P2P") {
                                 val myId = NetworkUtils.getDeviceId(context)
                                 val myIp = NetworkUtils.getLocalIpAddress()
-                                if (beacon.id != myId && beacon.ip != myIp) {
+                                val myOmaId = getMyOmaId()
+                                val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
+                                
+                                val isSelfOmaId = myOmaId.isNotBlank() && peerOmaId.isNotBlank() && 
+                                    OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
+                                val isSelfDevice = beacon.id == myId || beacon.ip == myIp || isSelfOmaId
+
+                                if (!isSelfDevice) {
                                     // Remote peer notified OFFLINE
                                     if (beacon.mode.equals("OFF", ignoreCase = true) || beacon.mode.equals("STOP", ignoreCase = true)) {
                                         val removed = peerMap.remove(beacon.id) != null
@@ -415,7 +460,6 @@ class DiscoveryManager(private val context: Context) {
                                     }
 
                                     val senderIp = packetAddr.hostAddress ?: beacon.ip
-                                    val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
                                     val isPaired = isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
 
                                     val peer = DiscoveredPeer(

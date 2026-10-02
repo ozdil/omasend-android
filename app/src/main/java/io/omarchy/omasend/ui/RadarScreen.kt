@@ -268,39 +268,6 @@ fun RadarScreen(
                         )
                     }
                     IconButton(
-                        onClick = { showQrScannerDialog = true },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.QrCodeScanner,
-                            contentDescription = "OmaID QR / Barkod Tara",
-                            modifier = Modifier.size(20.dp),
-                            tint = Color(0xFF38BDF8)
-                        )
-                    }
-                    IconButton(
-                        onClick = { showQrDialog = true },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.QrCode,
-                            contentDescription = "Web QR Paylaşım",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = { showDirectIpDialog = true },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.AddLink,
-                            contentDescription = "Doğrudan IP Ekle",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
                         onClick = { showInfoDialog = true },
                         modifier = Modifier.size(38.dp)
                     ) {
@@ -767,7 +734,7 @@ fun LocalDeviceHeroCard(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "IP: ${NetworkUtils.getLocalIpAddress()}:53317 • BT Aktif",
+                        text = "IP: ${NetworkUtils.getLocalIpAddress()}:53317",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace
@@ -1033,16 +1000,17 @@ fun ModernPeerCard(
                     }
                     if (peer.isTrusted) {
                         Spacer(modifier = Modifier.width(4.dp))
+                        val isOnline = peer.lastSeen > 0L && peer.ip.isNotBlank()
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFF59E0B).copy(alpha = 0.15f)
+                            color = if (isOnline) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
                         ) {
                             Text(
-                                text = "EŞLEŞMİŞ",
+                                text = if (isOnline) "ÇEVRİMİÇİ" else "BEKLEMEDE",
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFD97706)
+                                color = if (isOnline) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1061,9 +1029,11 @@ fun ModernPeerCard(
             Spacer(modifier = Modifier.width(8.dp))
 
             // Action Buttons
+            val isOnline = peer.lastSeen > 0L && peer.ip.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FilledTonalButton(
                     onClick = onSendClick,
+                    enabled = isOnline,
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                 ) {
@@ -1074,7 +1044,7 @@ fun ModernPeerCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "GÖNDER",
+                        text = if (isOnline) "GÖNDER" else "BEKLİYOR",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -2299,105 +2269,69 @@ fun OmaIdCapsuleCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedButton(
-                    onClick = onCopyId,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "Kopyala",
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
-                }
-
-                OutlinedButton(
+                Button(
                     onClick = onShowQr,
-                    modifier = Modifier.weight(0.9f),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                 ) {
                     Icon(
                         Icons.Default.QrCode,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "QR",
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onScanQr,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF38BDF8)
-                    ),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        Icons.Default.QrCodeScanner,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = Color(0xFF38BDF8)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "Tara",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "QR Kodum",
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
                 }
 
-                OutlinedButton(
-                    onClick = onEditId,
-                    modifier = Modifier.weight(0.9f),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
+                Button(
+                    onClick = onScanQr,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                 ) {
                     Icon(
-                        Icons.Default.Edit,
+                        Icons.Default.QrCodeScanner,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Bağla",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "Cihaz Eşle",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
                 }
 
-                OutlinedButton(
-                    onClick = onResetId,
-                    modifier = Modifier.weight(0.9f),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
+                IconButton(
+                    onClick = onEditId,
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "Sıfırla",
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1
+                        Icons.Default.Edit,
+                        contentDescription = "OmaID Değiştir",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
