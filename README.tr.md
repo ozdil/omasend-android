@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/S%C3%BCr%C3%BCm-v1.7.0-38BDF8?style=for-the-badge&logo=android" alt="Sürüm v1.7.0" /></a>
+  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/S%C3%BCr%C3%BCm-v1.7.1-38BDF8?style=for-the-badge&logo=android" alt="Sürüm v1.7.1" /></a>
   <a href="https://play.google.com/apps/testing/io.omarchy.omasend"><img src="https://img.shields.io/badge/Google%20Play-Kapal%C4%B1%20Beta-34A853?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play Kapalı Beta" /></a>
   <a href="https://groups.google.com/g/omasend-testers"><img src="https://img.shields.io/badge/Google%20Grubu-Test%20Ekibi-4285F4?style=for-the-badge&logo=googlegroups&logoColor=white" alt="Google Grubuna Katıl" /></a>
   <a href="https://github.com/ozdil/omarchy-omasend"><img src="https://img.shields.io/badge/Omarchy%20Linux-Masa%C3%BCst%C3%BC%20Eklentisi-00ADD8?style=for-the-badge&logo=archlinux&logoColor=white" alt="Omarchy Linux Eklentisi" /></a>
