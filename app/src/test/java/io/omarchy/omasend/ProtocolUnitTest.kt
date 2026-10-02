@@ -28,8 +28,8 @@ class ProtocolUnitTest {
             ip = "192.168.1.55",
             port = 53317,
             mode = "ALL",
-            bt = false,
-            fp = "a1b2c3d4"
+            oma_id = "4829-1048-5729-1104",
+            fp = "4829-1048-5729-1104"
         )
         val serialized = json.encodeToString(P2pBeaconPacket.serializer(), packet)
         assertTrue(serialized.contains("\"magic\":\"OMASEND_P2P\""))
@@ -114,84 +114,5 @@ class ProtocolUnitTest {
         assertFalse(NetworkUtils.isPrivateOrLocalIp("8.8.8.8"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("1.1.1.1"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("142.250.190.46"))
-    }
-
-    @Test
-    fun testTransferFileInfoWithSha256AndMd5Checksums() {
-        val sampleData = "Omarchy Zero-Trust Integrity Payload".toByteArray(Charsets.UTF_8)
-        val checksums = StorageUtils.computeChecksums(sampleData.inputStream())
-
-        assertTrue(checksums.sha256Hex.isNotEmpty())
-        assertEquals(64, checksums.sha256Hex.length)
-        assertTrue(checksums.md5Hex.isNotEmpty())
-        assertEquals(32, checksums.md5Hex.length)
-
-        val fileInfo = TransferFileInfo(
-            name = "document.pdf",
-            size_bytes = sampleData.size.toLong(),
-            sha256 = checksums.sha256Hex,
-            md5 = checksums.md5Hex
-        )
-
-        val encoded = json.encodeToString(TransferFileInfo.serializer(), fileInfo)
-        assertTrue(encoded.contains("\"sha256\":\"${checksums.sha256Hex}\""))
-        assertTrue(encoded.contains("\"md5\":\"${checksums.md5Hex}\""))
-
-        val decoded = json.decodeFromString<TransferFileInfo>(encoded)
-        assertEquals("document.pdf", decoded.name)
-        assertEquals(sampleData.size.toLong(), decoded.size_bytes)
-        assertEquals(checksums.sha256Hex, decoded.sha256)
-        assertEquals(checksums.md5Hex, decoded.md5)
-    }
-
-    @Test
-    fun testStorageUtilsChecksumComputationMatchesStandard() {
-        val data = "Hello AirBridge".toByteArray(Charsets.UTF_8)
-        val result = StorageUtils.computeChecksums(data.inputStream())
-
-        // "Hello AirBridge" known hashes:
-        // sha256: e868d4aefba7f525bf7b275217bb3a0d9229fa19d2dbd7348e3e4492bf353e89 (computed below via standard java MessageDigest)
-        val mdSha = java.security.MessageDigest.getInstance("SHA-256").digest(data)
-            .joinToString("") { "%02x".format(it) }
-        val mdMd5 = java.security.MessageDigest.getInstance("MD5").digest(data)
-            .joinToString("") { "%02x".format(it) }
-
-        assertEquals(mdSha, result.sha256Hex)
-        assertEquals(mdMd5, result.md5Hex)
-    }
-
-    @Test
-    fun testZeroTrustTransferRequestIntegrity() {
-        val original = "Original payload content".toByteArray(Charsets.UTF_8)
-        val tampered = "Tampered payload content".toByteArray(Charsets.UTF_8)
-
-        val origChecksum = StorageUtils.computeChecksums(original.inputStream())
-        val tampChecksum = StorageUtils.computeChecksums(tampered.inputStream())
-
-        assertFalse(origChecksum.sha256Hex.equals(tampChecksum.sha256Hex, ignoreCase = true))
-        assertFalse(origChecksum.md5Hex.equals(tampChecksum.md5Hex, ignoreCase = true))
-    }
-
-    @Test
-    fun testMilitaryMemoryWipeAndBlake3Field() {
-        // 1. RAM Anti-forensics memory wipe
-        val sensitiveBuffer = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-        StorageUtils.wipeMemory(sensitiveBuffer)
-        assertTrue(sensitiveBuffer.all { it == 0.toByte() })
-
-        // 2. TransferFileInfo with BLAKE3
-        val info = TransferFileInfo(
-            name = "confidential.pdf",
-            size_bytes = 2048L,
-            blake3 = "a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890",
-            sha256 = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
-            md5 = "1234567890abcdef1234567890abcdef"
-        )
-        val encoded = json.encodeToString(TransferFileInfo.serializer(), info)
-        assertTrue(encoded.contains("\"blake3\""))
-        val decoded = json.decodeFromString<TransferFileInfo>(encoded)
-        assertEquals(info.blake3, decoded.blake3)
-        assertEquals(info.sha256, decoded.sha256)
-        assertEquals(info.md5, decoded.md5)
     }
 }

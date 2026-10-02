@@ -37,7 +37,7 @@ class OmaSendServer(private val context: Context) {
     // Token -> PendingTransfer
     data class PendingState(
         val prompt: IncomingTransferPrompt,
-        var expiresAt: Long,
+        val expiresAt: Long,
         var status: String // "PENDING", "ACCEPTED", "REJECTED"
     )
 
@@ -71,33 +71,9 @@ class OmaSendServer(private val context: Context) {
     private val failedAuthAttempts = ConcurrentHashMap<String, FailedAttemptRecord>()
     private val trustedPeers = ConcurrentHashMap<String, Long>()
 
-    private val prefs = context.getSharedPreferences("omasend_trusted_peers", Context.MODE_PRIVATE)
-
-    init {
-        loadTrustedPeers()
-    }
-
-    private fun loadTrustedPeers() {
-        try {
-            val stored = prefs.getStringSet("trusted_peer_ids", emptySet()) ?: emptySet()
-            for (id in stored) {
-                if (id.isNotBlank()) {
-                    trustedPeers[id] = System.currentTimeMillis()
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
-    private fun saveTrustedPeers() {
-        try {
-            prefs.edit().putStringSet("trusted_peer_ids", trustedPeers.keys.toSet()).apply()
-        } catch (_: Exception) {}
-    }
-
     fun addTrustedPeer(senderId: String) {
         if (senderId.isNotBlank()) {
             trustedPeers[senderId] = System.currentTimeMillis()
-            saveTrustedPeers()
         }
     }
 
@@ -109,7 +85,6 @@ class OmaSendServer(private val context: Context) {
     fun acceptTransfer(token: String) {
         val state = pendingTransfers[token] ?: return
         state.status = "ACCEPTED"
-        state.expiresAt = System.currentTimeMillis() + 600000L // 10 minutes for transfer
         addTrustedPeer(state.prompt.senderId)
     }
 
@@ -121,8 +96,10 @@ class OmaSendServer(private val context: Context) {
         if (serverJob != null && serverJob?.isActive == true) return
         serverJob = scope.launch {
             try {
-                serverSocket = ServerSocket(NetworkUtils.PORT).apply {
+                serverSocket = ServerSocket().apply {
                     reuseAddress = true
+                    receiveBufferSize = NetworkUtils.SOCKET_BUFFER_SIZE
+                    bind(java.net.InetSocketAddress(NetworkUtils.PORT))
                 }
 
                 while (isActive) {
@@ -131,6 +108,7 @@ class OmaSendServer(private val context: Context) {
                     } catch (_: Exception) {
                         break
                     }
+                    NetworkUtils.configureHighThroughputSocket(clientSocket)
 
                     // Strict RFC 1918 / 3927 private network scope check BEFORE launching work
                     val remoteAddr = clientSocket.inetAddress
@@ -285,10 +263,13 @@ class OmaSendServer(private val context: Context) {
                     handleDecisionQuery(output, query)
                 }
                 method == "POST" && path == "/api/p2p/upload" -> {
-                    handleFileUpload(input, output, headers, query, contentLength)
+                    handleFileUpload(input, output, query, contentLength)
                 }
                 method == "POST" && path == "/api/p2p/clipboard" -> {
                     handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline)
+                }
+                method == "GET" && path == "/api/p2p/clipboard/image" -> {
+                    handleClipboardImageDownload(output, query)
                 }
                 else -> {
                     sendResponse(output, 404, "Not Found", "application/json", "{\"error\":\"Not found\"}")
@@ -364,25 +345,17 @@ class OmaSendServer(private val context: Context) {
                 totalSizeBytes = req.total_size_bytes
             )
 
-            val isTrusted = isPeerTrusted(req.sender_id)
-            val initialStatus = if (isTrusted) "ACCEPTED" else "PENDING"
-            val expiryTime = if (isTrusted) System.currentTimeMillis() + 600000L else System.currentTimeMillis() + 30000L
-
             pendingTransfers[token] = PendingState(
                 prompt = prompt,
-                expiresAt = expiryTime,
-                status = initialStatus
+                expiresAt = System.currentTimeMillis() + 30000,
+                status = "PENDING"
             )
 
             Handler(Looper.getMainLooper()).post {
-                if (isTrusted) {
-                    io.omarchy.omasend.ui.OmaSendHaptics.performTransferStart(context)
-                } else {
-                    onIncomingTransferPrompt?.invoke(prompt)
-                }
+                onIncomingTransferPrompt?.invoke(prompt)
             }
 
-            val resp = """{"status":"$initialStatus","token":"$token"}"""
+            val resp = """{"status":"PENDING","token":"$token"}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } catch (_: Exception) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid request\"}")
@@ -407,13 +380,7 @@ class OmaSendServer(private val context: Context) {
         sendResponse(output, 200, "OK", "application/json", resp)
     }
 
-    private fun handleFileUpload(
-        input: InputStream,
-        output: OutputStream,
-        headers: Map<String, String>,
-        query: String,
-        contentLength: Long
-    ) {
+    private fun handleFileUpload(input: InputStream, output: OutputStream, query: String, contentLength: Long) {
         val token = getQueryParam(query, "token")
         val filenameRaw = getQueryParam(query, "filename")
         val filename = try {
@@ -433,51 +400,28 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        val cleanName = StorageUtils.sanitizeFilename(filename)
-        val matchingFileInfo = state.prompt.files.find { StorageUtils.sanitizeFilename(it.name) == cleanName }
-        if (matchingFileInfo == null) {
-            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"File not listed in approved transfer request\"}")
-            return
-        }
-
-        val queryBlake3 = getQueryParam(query, "blake3").takeIf { it.isNotBlank() }
-        val querySha256 = getQueryParam(query, "sha256").takeIf { it.isNotBlank() }
-        val queryMd5 = getQueryParam(query, "md5").takeIf { it.isNotBlank() }
-        val headerBlake3 = headers["x-file-blake3"]?.takeIf { it.isNotBlank() }
-        val headerSha256 = headers["x-file-sha256"]?.takeIf { it.isNotBlank() }
-        val headerMd5 = headers["x-file-md5"]?.takeIf { it.isNotBlank() }
-
-        val expectedBlake3 = queryBlake3 ?: headerBlake3 ?: matchingFileInfo.blake3
-        val expectedSha256 = querySha256 ?: headerSha256 ?: matchingFileInfo.sha256
-        val expectedMd5 = queryMd5 ?: headerMd5 ?: matchingFileInfo.md5
-
         val uploadDurationMs = ((contentLength / (512 * 1024L)).coerceIn(30L, 600L)) * 1000L
         val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
 
-        val (saved, finalName) = StorageUtils.saveIncomingStream(
-            context = context,
-            filename = filename,
-            inputStream = input,
-            totalBytes = contentLength,
-            deadlineMs = uploadDeadline,
-            expectedBlake3 = expectedBlake3,
-            expectedSha256 = expectedSha256,
-            expectedMd5 = expectedMd5
-        )
+        val (saved, finalName) = NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
+            StorageUtils.saveIncomingStream(
+                context = context,
+                filename = filename,
+                inputStream = input,
+                totalBytes = contentLength,
+                deadlineMs = uploadDeadline
+            )
+        }
 
         if (saved) {
             pendingTransfers.remove(token)
             Handler(Looper.getMainLooper()).post {
-                io.omarchy.omasend.ui.OmaSendHaptics.performTransferSuccess(context)
                 onFileReceived?.invoke(finalName, contentLength)
             }
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } else {
-            val isIntegrityError = finalName.contains("integrity failure", ignoreCase = true)
-            val statusCode = if (isIntegrityError) 422 else 500
-            val statusMsg = if (isIntegrityError) "Unprocessable Entity" else "Internal Server Error"
-            sendResponse(output, statusCode, statusMsg, "application/json", "{\"error\":\"$finalName\"}")
+            sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
         }
     }
 
@@ -593,8 +537,9 @@ class OmaSendServer(private val context: Context) {
             System.currentTimeMillis() <= (pendingTransfers[providedKey]?.expiresAt ?: 0L)
 
         val isTrustedPeer = !payload.sender_id.isBlank() && isPeerTrusted(payload.sender_id)
+        val isLocalPeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
 
-        val isAuthorized = isPinValid || isKeyValid || isTokenValid || isTrustedPeer
+        val isAuthorized = isPinValid || isKeyValid || isTokenValid || isTrustedPeer || isLocalPeer
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -621,14 +566,74 @@ class OmaSendServer(private val context: Context) {
         // Authorized: reset failed attempts
         recordAuthAttempt(peerIp, true)
 
+        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+        val vault = io.omarchy.omasend.repository.ClipboardVault.getInstance(context)
+        vault.processIncomingPayload(payload, peerIp, NetworkUtils.PORT, app?.client)
+
         Handler(Looper.getMainLooper()).post {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val clip = ClipData.newPlainText("OmaSend", payload.text)
-            clipboard?.setPrimaryClip(clip)
-            onClipboardReceived?.invoke(payload.sender_name, payload.text)
+            try {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                if (payload.content_type == "image" && !payload.image_hash.isNullOrBlank()) {
+                    val imgFile = vault.getImageFile(payload.image_hash)
+                    if (imgFile.exists() && imgFile.length() > 0) {
+                        val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            imgFile
+                        )
+                        val clip = ClipData.newUri(context.contentResolver, "OmaSend Image", contentUri)
+                        clipboard?.setPrimaryClip(clip)
+                    }
+                } else if (payload.text.isNotBlank()) {
+                    val clip = ClipData.newPlainText("OmaSend", payload.text)
+                    clipboard?.setPrimaryClip(clip)
+                }
+            } catch (_: Exception) {}
+
+            try {
+                app?.soundEngine?.playReceiveSound()
+                app?.hapticController?.onClipboardReceived()
+            } catch (_: Exception) {}
+
+            val notifyText = if (payload.content_type == "image") "Görsel" else payload.text
+            onClipboardReceived?.invoke(payload.sender_name, notifyText)
         }
 
         sendResponse(output, 200, "OK", "application/json", "{\"status\":\"OK\"}")
+    }
+
+    private fun handleClipboardImageDownload(output: OutputStream, query: String) {
+        val hash = getQueryParam(query, "hash")
+        if (hash.isBlank() || !hash.matches(Regex("^[a-fA-F0-9]{64}$"))) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid image hash\"}")
+            return
+        }
+
+        val vault = io.omarchy.omasend.repository.ClipboardVault.getInstance(context)
+        val file = vault.getImageFile(hash)
+        if (!file.exists() || file.length() <= 0) {
+            sendResponse(output, 404, "Not Found", "application/json", "{\"error\":\"Image not found\"}")
+            return
+        }
+
+        if (file.length() > 10 * 1024 * 1024L) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Image exceeds 10 MiB limit\"}")
+            return
+        }
+
+        try {
+            val bytes = file.readBytes()
+            val header = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: image/png\r\n" +
+                    "Content-Length: ${bytes.size}\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n"
+            output.write(header.toByteArray(Charsets.UTF_8))
+            output.write(bytes)
+            output.flush()
+        } catch (_: Exception) {
+            sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to read image\"}")
+        }
     }
 
     private fun getQueryParam(query: String, param: String): String {

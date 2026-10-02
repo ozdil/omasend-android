@@ -72,8 +72,8 @@ fun OmaSendTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = OmaSendTypography,
         content = content
     )
 }
 
+val JetBrainsMonoFontFamily = androidx.compose.ui.text.font.FontFamily.Monospace

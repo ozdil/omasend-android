@@ -1,6 +1,8 @@
 package io.omarchy.omasend
 
 import android.Manifest
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,12 +24,13 @@ import io.omarchy.omasend.ui.theme.OmaSendTheme
 class MainActivity : ComponentActivity() {
 
     private var incomingPrompt by mutableStateOf<IncomingTransferPrompt?>(null)
+    private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         val app = application as? OmaSendApp
-        app?.discoveryManager?.refreshBluetoothPeers()
+        app?.discoveryManager?.forceRefresh()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,11 +39,18 @@ class MainActivity : ComponentActivity() {
 
         val app = application as OmaSendApp
 
-        // Request modern notifications, storage and bluetooth permissions
+        // Request modern notifications and camera/storage permissions
         checkAndRequestPermissions()
 
         // Start background service
         OmaSendForegroundService.startService(this)
+
+        // Setup local clipboard tracking
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+            app.clipboardVault.processLocalClipboard(this, app)
+        }
+        clipboard?.addPrimaryClipChangedListener(clipboardListener)
 
         // Wire server callbacks
         app.server.onIncomingTransferPrompt = { prompt ->
@@ -48,6 +58,8 @@ class MainActivity : ComponentActivity() {
         }
 
         app.server.onFileReceived = { filename, size ->
+            app.soundEngine.playReceiveSound()
+            app.hapticController.onFileReceivedImpact()
             Toast.makeText(
                 this,
                 "Received '$filename' (${NetworkUtils.formatBytes(size)}) saved to Downloads/OmaSend",
@@ -82,7 +94,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val app = application as? OmaSendApp
-        app?.discoveryManager?.refreshBluetoothPeers()
+        app?.discoveryManager?.forceRefresh()
+        app?.networkWatcher?.forceRefresh()
     }
 
     private fun checkAndRequestPermissions() {
@@ -94,15 +107,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            }
-        }
-
         if (permissions.isNotEmpty()) {
             permissionLauncher.launch(permissions.toTypedArray())
         }
@@ -110,6 +114,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        clipboardListener?.let {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.removePrimaryClipChangedListener(it)
+        }
         val app = application as? OmaSendApp
         app?.discoveryManager?.stop()
         OmaSendForegroundService.stopService(this)

@@ -2,61 +2,56 @@ package io.omarchy.omasend.network
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import io.omarchy.omasend.model.TransferMetrics
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
 
+/**
+ * StorageUtils
+ *
+ * Implements Scoped Storage persistence with ACM SIGCOMM streaming pipeline principles,
+ * backpressure-conscious buffer management, and live StateFlow metrics.
+ */
 object StorageUtils {
 
     const val MAX_FILE_SIZE = 10L * 1024 * 1024 * 1024L // 10 GiB ceiling
+    const val STREAM_CHUNK_SIZE = 128 * 1024 // 128 KiB chunked streaming
+
+    private val RESERVED_NAMES = setOf(
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    )
+
+    private val _incomingTransferMetrics = MutableStateFlow<TransferMetrics?>(null)
+    val incomingTransferMetrics: StateFlow<TransferMetrics?> = _incomingTransferMetrics.asStateFlow()
 
     fun sanitizeFilename(raw: String): String {
-        // Strip null bytes, slashes, backslashes, and control characters
-        val cleanChars = raw.replace("\u0000", "")
+        val trimmed = raw.replace("\u0000", "")
             .replace('/', '_')
             .replace('\\', '_')
             .filter { it.isLetterOrDigit() || it in ".-_ " }
             .trim()
 
-        return if (cleanChars.isEmpty() || cleanChars.startsWith(".") || cleanChars.contains("..")) {
-            "file_${System.currentTimeMillis()}"
-        } else {
-            cleanChars.take(180)
+        var clean = trimmed
+        while (clean.contains("..")) {
+            clean = clean.replace("..", "_")
         }
-    }
 
-    data class ChecksumResult(
-        val sha256Hex: String,
-        val md5Hex: String,
-        val blake3Hex: String? = null
-    )
-
-    fun wipeMemory(buffer: ByteArray) {
-        buffer.fill(0)
-    }
-
-    fun computeChecksums(inputStream: InputStream): ChecksumResult {
-        val sha256 = MessageDigest.getInstance("SHA-256")
-        val md5 = MessageDigest.getInstance("MD5")
-        val buffer = ByteArray(65536)
-        var read: Int
-        try {
-            while (inputStream.read(buffer).also { read = it } != -1) {
-                sha256.update(buffer, 0, read)
-                md5.update(buffer, 0, read)
-            }
-        } finally {
-            wipeMemory(buffer)
+        val baseName = clean.substringBeforeLast('.', clean)
+        if (clean.isEmpty() || clean.startsWith(".") || clean.all { it == '.' || it == '_' || it == '-' || it == ' ' } || RESERVED_NAMES.contains(baseName.uppercase())) {
+            return "file_${System.currentTimeMillis()}"
         }
-        return ChecksumResult(
-            sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
-            md5Hex = md5.digest().joinToString("") { "%02x".format(it) }
-        )
+        return clean.take(180)
     }
 
     fun saveIncomingStream(
@@ -65,22 +60,43 @@ object StorageUtils {
         inputStream: InputStream,
         totalBytes: Long,
         deadlineMs: Long = Long.MAX_VALUE,
-        expectedBlake3: String? = null,
-        expectedSha256: String? = null,
-        expectedMd5: String? = null,
         onProgress: ((bytesRead: Long, total: Long) -> Unit)? = null
     ): Pair<Boolean, String> {
+        val progressCallback: ((Long, Long, TransferMetrics) -> Unit)? = if (onProgress != null) {
+            { read, total, _ -> onProgress(read, total) }
+        } else null
+
+        return saveIncomingStreamWithMetrics(
+            context = context,
+            filename = filename,
+            inputStream = inputStream,
+            totalBytes = totalBytes,
+            deadlineMs = deadlineMs,
+            onProgressWithMetrics = progressCallback
+        )
+    }
+
+    fun saveIncomingStreamWithMetrics(
+        context: Context,
+        filename: String,
+        inputStream: InputStream,
+        totalBytes: Long,
+        deadlineMs: Long = Long.MAX_VALUE,
+        onProgressWithMetrics: ((bytesRead: Long, total: Long, metrics: TransferMetrics) -> Unit)? = null
+    ): Pair<Boolean, String> {
         if (totalBytes <= 0 || totalBytes > MAX_FILE_SIZE) {
+            _incomingTransferMetrics.value = null
             return Pair(false, "Invalid or excessive file size ($totalBytes bytes)")
         }
 
-        // Check available device storage before allocating (require at least file size + 64 MB buffer)
         val usableSpace = context.filesDir.usableSpace
         if (usableSpace > 0 && usableSpace < (totalBytes + 64L * 1024 * 1024)) {
+            _incomingTransferMetrics.value = null
             return Pair(false, "Insufficient storage space on device")
         }
 
         val cleanName = sanitizeFilename(filename)
+        val speedCalculator = TransferSpeedCalculator(totalBytes)
 
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -91,39 +107,34 @@ object StorageUtils {
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
 
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                val uri: Uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                     ?: return Pair(false, "Failed to create MediaStore entry")
 
-                val checksums = try {
-                    resolver.openOutputStream(uri)?.use { out ->
-                        pipeStreamWithChecksums(inputStream, out, totalBytes, deadlineMs, onProgress)
-                    } ?: return Pair(false, "Failed to open MediaStore output stream")
+                try {
+                    resolver.openOutputStream(uri)?.let { rawOut ->
+                        java.io.BufferedOutputStream(rawOut, STREAM_CHUNK_SIZE).use { out ->
+                            pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, onProgressWithMetrics)
+                        }
+                    } ?: throw java.io.IOException("Cannot open output stream for MediaStore URI")
+
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                    _incomingTransferMetrics.value = null
+                    Pair(true, cleanName)
                 } catch (e: Exception) {
+                    _incomingTransferMetrics.value = null
+                    // Rollback dangling pending entry
                     try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                     throw e
                 }
-
-                // Verify cryptographic integrity
-                if (expectedSha256 != null && !expectedSha256.equals(checksums.sha256Hex, ignoreCase = true)) {
-                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
-                    return Pair(false, "File integrity failure: SHA-256 checksum mismatch")
-                }
-                if (expectedMd5 != null && !expectedMd5.equals(checksums.md5Hex, ignoreCase = true)) {
-                    try { resolver.delete(uri, null, null) } catch (_: Exception) {}
-                    return Pair(false, "File integrity failure: MD5 checksum mismatch")
-                }
-
-                contentValues.clear()
-                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(uri, contentValues, null, null)
-                Pair(true, cleanName)
             } else {
                 val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "OmaSend")
                 if (!dir.exists()) dir.mkdirs()
 
                 var target = File(dir, cleanName)
-                // Strict path traversal defense: target MUST reside within dir
                 if (!target.canonicalPath.startsWith(dir.canonicalPath)) {
+                    _incomingTransferMetrics.value = null
                     return Pair(false, "Directory traversal detected")
                 }
 
@@ -135,74 +146,67 @@ object StorageUtils {
                     while (target.exists() && counter < 1000) {
                         target = File(dir, "$name ($counter)$ext")
                         if (!target.canonicalPath.startsWith(dir.canonicalPath)) {
+                            _incomingTransferMetrics.value = null
                             return Pair(false, "Directory traversal detected")
                         }
                         counter++
                     }
                 }
 
-                val checksums = try {
-                    FileOutputStream(target).use { out ->
-                        pipeStreamWithChecksums(inputStream, out, totalBytes, deadlineMs, onProgress)
+                try {
+                    java.io.BufferedOutputStream(FileOutputStream(target), STREAM_CHUNK_SIZE).use { out ->
+                        pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, onProgressWithMetrics)
                     }
+                    _incomingTransferMetrics.value = null
+                    Pair(true, target.name)
                 } catch (e: Exception) {
-                    if (target.exists()) target.delete()
+                    _incomingTransferMetrics.value = null
+                    try { if (target.exists()) target.delete() } catch (_: Exception) {}
                     throw e
                 }
-
-                // Verify cryptographic integrity
-                if (expectedSha256 != null && !expectedSha256.equals(checksums.sha256Hex, ignoreCase = true)) {
-                    if (target.exists()) target.delete()
-                    return Pair(false, "File integrity failure: SHA-256 checksum mismatch")
-                }
-                if (expectedMd5 != null && !expectedMd5.equals(checksums.md5Hex, ignoreCase = true)) {
-                    if (target.exists()) target.delete()
-                    return Pair(false, "File integrity failure: MD5 checksum mismatch")
-                }
-
-                Pair(true, target.name)
             }
         } catch (e: Exception) {
+            _incomingTransferMetrics.value = null
             Pair(false, e.message ?: "Unknown storage error")
         }
     }
 
-    private fun pipeStreamWithChecksums(
+    private fun pipeStreamWithBackpressure(
         input: InputStream,
         output: OutputStream,
         totalBytes: Long,
         deadlineMs: Long,
-        onProgress: ((bytesRead: Long, total: Long) -> Unit)?
-    ): ChecksumResult {
-        val sha256 = MessageDigest.getInstance("SHA-256")
-        val md5 = MessageDigest.getInstance("MD5")
-        val buffer = ByteArray(65536)
+        speedCalculator: TransferSpeedCalculator,
+        onProgress: ((bytesRead: Long, total: Long, metrics: TransferMetrics) -> Unit)?
+    ) {
+        val buffer = ByteArray(STREAM_CHUNK_SIZE)
         var totalRead = 0L
-        var read: Int
         var remaining = totalBytes
+        var chunksSinceFlush = 0
 
-        try {
-            while (remaining > 0) {
-                if (System.currentTimeMillis() > deadlineMs) {
-                    throw java.io.InterruptedIOException("File upload exceeded monotonic deadline")
-                }
-                val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
-                read = input.read(buffer, 0, toRead)
-                if (read == -1) break
-                output.write(buffer, 0, read)
-                sha256.update(buffer, 0, read)
-                md5.update(buffer, 0, read)
-                totalRead += read
-                remaining -= read
-                onProgress?.invoke(totalRead, totalBytes)
+        while (remaining > 0) {
+            if (System.currentTimeMillis() > deadlineMs) {
+                throw java.io.InterruptedIOException("File upload exceeded monotonic deadline")
             }
-            output.flush()
-        } finally {
-            wipeMemory(buffer)
+            val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
+            val read = input.read(buffer, 0, toRead)
+            if (read == -1) break
+
+            output.write(buffer, 0, read)
+            totalRead += read
+            remaining -= read
+            chunksSinceFlush++
+
+            // Backpressure: Periodic flush every 512 KiB (4 chunks) to prevent buffer accumulation
+            if (chunksSinceFlush >= 4) {
+                output.flush()
+                chunksSinceFlush = 0
+            }
+
+            val metrics = speedCalculator.update(totalRead)
+            _incomingTransferMetrics.value = metrics
+            onProgress?.invoke(totalRead, totalBytes, metrics)
         }
-        return ChecksumResult(
-            sha256Hex = sha256.digest().joinToString("") { "%02x".format(it) },
-            md5Hex = md5.digest().joinToString("") { "%02x".format(it) }
-        )
+        output.flush()
     }
 }

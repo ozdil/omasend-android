@@ -15,8 +15,35 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.io.InputStream
+import java.net.InetAddress
+import java.net.Socket
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
+
+private class HighPerfSocketFactory(
+    private val delegate: SocketFactory = SocketFactory.getDefault()
+) : SocketFactory() {
+    override fun createSocket(): Socket {
+        return delegate.createSocket().also { NetworkUtils.configureHighThroughputSocket(it) }
+    }
+
+    override fun createSocket(host: String, port: Int): Socket {
+        return delegate.createSocket(host, port).also { NetworkUtils.configureHighThroughputSocket(it) }
+    }
+
+    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket {
+        return delegate.createSocket(host, port, localHost, localPort).also { NetworkUtils.configureHighThroughputSocket(it) }
+    }
+
+    override fun createSocket(host: InetAddress, port: Int): Socket {
+        return delegate.createSocket(host, port).also { NetworkUtils.configureHighThroughputSocket(it) }
+    }
+
+    override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket {
+        return delegate.createSocket(address, port, localAddress, localPort).also { NetworkUtils.configureHighThroughputSocket(it) }
+    }
+}
 
 class OmaSendClient(private val context: Context) {
     private val json = Json {
@@ -24,6 +51,7 @@ class OmaSendClient(private val context: Context) {
         ignoreUnknownKeys = true
     }
     private val client = OkHttpClient.Builder()
+        .socketFactory(HighPerfSocketFactory())
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
@@ -109,14 +137,34 @@ class OmaSendClient(private val context: Context) {
         filename: String,
         totalBytes: Long,
         inputStream: InputStream,
-        blake3: String? = null,
-        sha256: String? = null,
-        md5: String? = null,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int) -> Unit
+    ): Result<Unit> {
+        return uploadFileStreamWithMetrics(
+            targetIp = targetIp,
+            targetPort = targetPort,
+            token = token,
+            filename = filename,
+            totalBytes = totalBytes,
+            inputStream = inputStream
+        ) { written, total, pct, _, _ ->
+            onProgress(written, total, pct)
+        }
+    }
+
+    fun uploadFileStreamWithMetrics(
+        targetIp: String,
+        targetPort: Int,
+        token: String,
+        filename: String,
+        totalBytes: Long,
+        inputStream: InputStream,
+        onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int, speedMBps: Double, etaSeconds: Long) -> Unit
     ): Result<Unit> {
         if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
             return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
         }
+        val speedCalculator = TransferSpeedCalculator(totalBytes)
+        val wifiLock = NetworkUtils.acquireHighPerfWifiLock(context, "OmaSend:ClientUpload")
         return try {
             val encodedName = URLEncoder.encode(filename, "UTF-8")
             val countingBody = object : RequestBody() {
@@ -124,45 +172,24 @@ class OmaSendClient(private val context: Context) {
                 override fun contentLength() = totalBytes
 
                 override fun writeTo(sink: BufferedSink) {
-                    val buffer = ByteArray(65536)
+                    val buffer = ByteArray(NetworkUtils.IO_CHUNK_SIZE)
                     var uploaded = 0L
                     var read: Int
-                    try {
-                        while (inputStream.read(buffer).also { read = it } != -1) {
-                            sink.write(buffer, 0, read)
-                            uploaded += read
-                            val percent = if (totalBytes > 0) ((uploaded * 100) / totalBytes).toInt() else 0
-                            onProgress(uploaded, totalBytes, percent)
-                        }
-                    } finally {
-                        StorageUtils.wipeMemory(buffer)
+                    while (inputStream.read(buffer).also { read = it } != -1) {
+                        sink.write(buffer, 0, read)
+                        uploaded += read
+                        val metrics = speedCalculator.update(uploaded)
+                        onProgress(uploaded, totalBytes, metrics.percent, metrics.speedMBps, metrics.etaSeconds)
                     }
+                    sink.flush()
                 }
             }
 
-            val queryParams = buildString {
-                append("token=").append(token)
-                append("&filename=").append(encodedName)
-                if (!blake3.isNullOrBlank()) append("&blake3=").append(blake3)
-                if (!sha256.isNullOrBlank()) append("&sha256=").append(sha256)
-                if (!md5.isNullOrBlank()) append("&md5=").append(md5)
-            }
-
-            val reqBuilder = Request.Builder()
-                .url("http://$targetIp:$targetPort/api/p2p/upload?$queryParams")
+            val request = Request.Builder()
+                .url("http://$targetIp:$targetPort/api/p2p/upload?token=$token&filename=$encodedName")
                 .post(countingBody)
+                .build()
 
-            if (!blake3.isNullOrBlank()) {
-                reqBuilder.addHeader("X-File-BLAKE3", blake3)
-            }
-            if (!sha256.isNullOrBlank()) {
-                reqBuilder.addHeader("X-File-SHA256", sha256)
-            }
-            if (!md5.isNullOrBlank()) {
-                reqBuilder.addHeader("X-File-MD5", md5)
-            }
-
-            val request = reqBuilder.build()
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
                 Result.success(Unit)
@@ -172,6 +199,7 @@ class OmaSendClient(private val context: Context) {
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
+            NetworkUtils.releaseWifiLock(wifiLock)
             try {
                 inputStream.close()
             } catch (_: Exception) {
@@ -209,6 +237,71 @@ class OmaSendClient(private val context: Context) {
             } else {
                 Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
             }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun sendClipboardPayload(
+        targetIp: String,
+        targetPort: Int,
+        payload: ClipboardPayload
+    ): Result<Unit> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
+        return try {
+            val fullPayload = payload.copy(
+                sender_id = NetworkUtils.getDeviceId(context),
+                sender_name = NetworkUtils.getDeviceName(context),
+                pin = NetworkUtils.getDevicePin(context),
+                token = NetworkUtils.getDeviceSessionKey(context)
+            )
+            val jsonBody = json.encodeToString(ClipboardPayload.serializer(), fullPayload)
+            val request = Request.Builder()
+                .url("http://$targetIp:$targetPort/api/p2p/clipboard")
+                .header("X-OmaSend-PIN", NetworkUtils.getDevicePin(context))
+                .header("X-OmaSend-Key", NetworkUtils.getDeviceSessionKey(context))
+                .post(jsonBody.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun fetchClipboardImage(
+        targetIp: String,
+        targetPort: Int,
+        hash: String
+    ): Result<ByteArray> {
+        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        }
+        return try {
+            val request = Request.Builder()
+                .url("http://$targetIp:$targetPort/api/p2p/clipboard/image?hash=$hash")
+                .header("X-OmaSend-PIN", NetworkUtils.getDevicePin(context))
+                .header("X-OmaSend-Key", NetworkUtils.getDeviceSessionKey(context))
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return Result.failure(Exception("HTTP ${response.code} fetching clipboard image"))
+            }
+            val body = response.body ?: return Result.failure(Exception("Empty image body"))
+            val bytes = body.bytes()
+            if (bytes.size > 10 * 1024 * 1024) {
+                return Result.failure(Exception("Image exceeds 10 MiB limit"))
+            }
+            Result.success(bytes)
         } catch (e: Exception) {
             Result.failure(e)
         }

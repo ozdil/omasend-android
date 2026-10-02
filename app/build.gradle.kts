@@ -15,8 +15,8 @@ android {
         applicationId = "io.omarchy.omasend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.3.1"
+        versionCode = 44
+        versionName = "1.7.0"
     }
 
     val keystorePropsFile: File? = listOf(
@@ -96,6 +96,12 @@ dependencies {
   implementation(libs.okhttp)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.zxing.core)
+
+  // CameraX for Zero-GMS QR/Barcode Scanning
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
 
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)

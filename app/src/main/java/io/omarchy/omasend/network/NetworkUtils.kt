@@ -75,11 +75,11 @@ object NetworkUtils {
     fun formatBytes(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"
         val kb = bytes / 1024.0
-        if (kb < 1024) return String.format("%.1f KB", kb)
+        if (kb < 1024) return String.format(java.util.Locale.US, "%.1f KB", kb)
         val mb = kb / 1024.0
-        if (mb < 1024) return String.format("%.1f MB", mb)
+        if (mb < 1024) return String.format(java.util.Locale.US, "%.1f MB", mb)
         val gb = mb / 1024.0
-        return String.format("%.2f GB", gb)
+        return String.format(java.util.Locale.US, "%.2f GB", gb)
     }
 
     /**
@@ -98,7 +98,9 @@ object NetworkUtils {
      * Validates an IPv4 or loopback string against RFC 1918, RFC 3927 link-local, or loopback.
      */
     fun isPrivateOrLocalIp(ip: String): Boolean {
-        val cleanIp = ip.substringBefore(':').trim()
+        val raw = ip.trim()
+        if (raw == "::1" || raw == "localhost" || raw == "127.0.0.1") return true
+        val cleanIp = raw.substringBefore(':').trim()
         if (cleanIp == "127.0.0.1" || cleanIp == "localhost" || cleanIp == "::1") return true
         val parts = cleanIp.split('.')
         if (parts.size != 4) return false
@@ -118,4 +120,93 @@ object NetworkUtils {
 
         return false
     }
+
+    const val SOCKET_BUFFER_SIZE: Int = 256 * 1024 // 256 KiB socket buffer for IEEE 802.11 throughput
+    const val IO_CHUNK_SIZE: Int = 128 * 1024 // 128 KiB chunked I/O stream alignment
+    const val IPTOS_THROUGHPUT: Int = 0x08 // RFC 791/1349 Throughput optimization
+
+    /**
+     * Configures a socket with IEEE 802.11 wireless and TCP high-throughput options:
+     * - TCP_NODELAY = true (disables Nagle algorithm to eliminate transmission latency spikes)
+     * - SO_SNDBUF = 256 KiB
+     * - SO_RCVBUF = 256 KiB
+     * - IP Traffic Class / TOS = 0x08 (Throughput / WMM queue optimization)
+     */
+    fun configureHighThroughputSocket(socket: java.net.Socket) {
+        try {
+            socket.tcpNoDelay = true
+            socket.sendBufferSize = SOCKET_BUFFER_SIZE
+            socket.receiveBufferSize = SOCKET_BUFFER_SIZE
+            socket.trafficClass = IPTOS_THROUGHPUT
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Acquires a high-performance Wi-Fi Lock to prevent IEEE 802.11 power saving throttling during transfers.
+     */
+    fun acquireHighPerfWifiLock(
+        context: Context,
+        tag: String = "OmaSend:HighPerfTransfer"
+    ): android.net.wifi.WifiManager.WifiLock? {
+        return try {
+            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                ?: return null
+            val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiManager.createWifiLock(lockMode, tag).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Safely releases a Wi-Fi Lock.
+     */
+    fun releaseWifiLock(lock: android.net.wifi.WifiManager.WifiLock?) {
+        try {
+            if (lock != null && lock.isHeld) {
+                lock.release()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Executes a block within the scope of a high-performance Wi-Fi Lock, ensuring guaranteed release.
+     */
+    inline fun <T> withHighPerfWifiLock(
+        context: Context,
+        tag: String = "OmaSend:HighPerfTransfer",
+        block: () -> T
+    ): T {
+        val lock = acquireHighPerfWifiLock(context, tag)
+        return try {
+            block()
+        } finally {
+            releaseWifiLock(lock)
+        }
+    }
+
+    fun computeSha256(bytes: ByteArray): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val hashBytes = digest.digest(bytes)
+            hashBytes.joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            bytes.contentHashCode().toString()
+        }
+    }
+
+    fun computeSha256(text: String): String {
+        return computeSha256(text.toByteArray(Charsets.UTF_8))
+    }
 }
+

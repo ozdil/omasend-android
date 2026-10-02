@@ -11,7 +11,7 @@ data class P2pBeaconPacket(
     val ip: String,
     val port: Int = 53317,
     val mode: String = "ALL",
-    val bt: Boolean = false,
+    val oma_id: String = "",
     val fp: String = ""
 )
 
@@ -21,6 +21,7 @@ data class DiscoveredPeer(
     val ip: String,
     val port: Int = 53317,
     val transport: String = "LAN",
+    val omaId: String = "",
     val fingerprint: String = "",
     val isTrusted: Boolean = false,
     val lastSeen: Long = System.currentTimeMillis()
@@ -29,10 +30,7 @@ data class DiscoveredPeer(
 @Serializable
 data class TransferFileInfo(
     val name: String,
-    val size_bytes: Long,
-    val blake3: String? = null,
-    val sha256: String? = null,
-    val md5: String? = null
+    val size_bytes: Long
 )
 
 @Serializable
@@ -60,10 +58,33 @@ data class TransferDecision(
 data class ClipboardPayload(
     val sender_id: String,
     val sender_name: String,
-    val text: String,
+    val text: String = "",
     val pin: String? = null,
-    val token: String? = null
+    val token: String? = null,
+    val content_type: String = "text",
+    val image_hash: String? = null,
+    val image_size: Long? = null,
+    val thumbnail_base64: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val image_data_base64: String? = null
 )
+
+@Serializable
+data class ClipboardEntry(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val text: String = "",
+    val senderName: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isMine: Boolean = false,
+    val contentType: String = "text",
+    val imageHash: String? = null,
+    val imageSize: Long? = null,
+    val thumbnailBase64: String? = null,
+    val width: Int? = null,
+    val height: Int? = null
+)
+
 
 sealed class TransferProgressState {
     object Idle : TransferProgressState()
@@ -75,11 +96,23 @@ sealed class TransferProgressState {
         val fileName: String,
         val bytesTransferred: Long,
         val totalBytes: Long,
-        val percent: Int
+        val percent: Int,
+        val speedMBps: Double = 0.0,
+        val etaSeconds: Long = 0L
     ) : TransferProgressState()
     data class Success(val message: String) : TransferProgressState()
     data class Error(val message: String) : TransferProgressState()
 }
+
+@Serializable
+data class TransferMetrics(
+    val bytesTransferred: Long = 0L,
+    val totalBytes: Long = 0L,
+    val percent: Int = 0,
+    val speedMBps: Double = 0.0,
+    val etaSeconds: Long = 0L,
+    val isCompleted: Boolean = false
+)
 
 data class IncomingTransferPrompt(
     val token: String,
