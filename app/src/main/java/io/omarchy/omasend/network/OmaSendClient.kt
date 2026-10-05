@@ -57,6 +57,12 @@ class OmaSendClient(private val context: Context) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    // Dedicated upload client with unlimited read/write timeout for multi-gigabyte file streaming
+    private val uploadClient = client.newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
     fun sendTransferRequest(
         targetIp: String,
         targetPort: Int,
@@ -80,14 +86,15 @@ class OmaSendClient(private val context: Context) {
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val response = client.newCall(request).execute()
-            val respBody = response.body?.string() ?: return Result.failure(Exception("Empty response"))
-            val transferResp = json.decodeFromString<TransferResponse>(respBody)
+            client.newCall(request).execute().use { response ->
+                val respBody = response.body?.string() ?: return Result.failure(Exception("Empty response"))
+                val transferResp = json.decodeFromString<TransferResponse>(respBody)
 
-            if (transferResp.token != null) {
-                Result.success(transferResp.token)
-            } else {
-                Result.failure(Exception(transferResp.error ?: "Peer rejected transfer request"))
+                if (transferResp.token != null) {
+                    Result.success(transferResp.token)
+                } else {
+                    Result.failure(Exception(transferResp.error ?: "Peer rejected transfer request"))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -111,9 +118,10 @@ class OmaSendClient(private val context: Context) {
                     .get()
                     .build()
 
-                val response = client.newCall(request).execute()
-                val respBody = response.body?.string() ?: ""
-                val decision = json.decodeFromString<TransferDecision>(respBody)
+                val decision = client.newCall(request).execute().use { response ->
+                    val respBody = response.body?.string() ?: ""
+                    json.decodeFromString<TransferDecision>(respBody)
+                }
 
                 when (decision.status) {
                     "ACCEPTED" -> return Result.success(true)
@@ -190,11 +198,12 @@ class OmaSendClient(private val context: Context) {
                 .post(countingBody)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("Upload failed with HTTP ${response.code}"))
+            uploadClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception("Upload failed with HTTP ${response.code}"))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -231,11 +240,12 @@ class OmaSendClient(private val context: Context) {
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -265,11 +275,12 @@ class OmaSendClient(private val context: Context) {
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception("Clipboard sync failed with HTTP ${response.code}"))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -292,16 +303,17 @@ class OmaSendClient(private val context: Context) {
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return Result.failure(Exception("HTTP ${response.code} fetching clipboard image"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return Result.failure(Exception("HTTP ${response.code} fetching clipboard image"))
+                }
+                val body = response.body ?: return Result.failure(Exception("Empty image body"))
+                val bytes = body.bytes()
+                if (bytes.size > 10 * 1024 * 1024) {
+                    return Result.failure(Exception("Image exceeds 10 MiB limit"))
+                }
+                Result.success(bytes)
             }
-            val body = response.body ?: return Result.failure(Exception("Empty image body"))
-            val bytes = body.bytes()
-            if (bytes.size > 10 * 1024 * 1024) {
-                return Result.failure(Exception("Image exceeds 10 MiB limit"))
-            }
-            Result.success(bytes)
         } catch (e: Exception) {
             Result.failure(e)
         }

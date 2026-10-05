@@ -263,7 +263,7 @@ class OmaSendServer(private val context: Context) {
                     handleDecisionQuery(output, query)
                 }
                 method == "POST" && path == "/api/p2p/upload" -> {
-                    handleFileUpload(input, output, query, contentLength)
+                    handleFileUpload(socket, input, output, query, contentLength)
                 }
                 method == "POST" && path == "/api/p2p/clipboard" -> {
                     handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline)
@@ -380,7 +380,7 @@ class OmaSendServer(private val context: Context) {
         sendResponse(output, 200, "OK", "application/json", resp)
     }
 
-    private fun handleFileUpload(input: InputStream, output: OutputStream, query: String, contentLength: Long) {
+    private fun handleFileUpload(socket: Socket, input: InputStream, output: OutputStream, query: String, contentLength: Long) {
         val token = getQueryParam(query, "token")
         val filenameRaw = getQueryParam(query, "filename")
         val filename = try {
@@ -400,7 +400,13 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        val uploadDurationMs = ((contentLength / (512 * 1024L)).coerceIn(30L, 600L)) * 1000L
+        // Configure socket timeout for active continuous streaming (30 seconds per I/O chunk)
+        try {
+            socket.soTimeout = 30000
+        } catch (_: Exception) {}
+
+        // Dynamic deadline based on minimum transfer rate of 256 KiB/s plus 60 seconds buffer
+        val uploadDurationMs = 60000L + ((contentLength / (256 * 1024L)) * 1000L).coerceAtLeast(30000L)
         val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
 
         val (saved, finalName) = NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {

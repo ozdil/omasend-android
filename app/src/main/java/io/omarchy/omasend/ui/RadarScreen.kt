@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -201,7 +202,7 @@ fun RadarScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    Icons.Default.Send,
+                                    Icons.AutoMirrored.Filled.Send,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
@@ -1048,7 +1049,7 @@ fun ModernPeerCard(
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Icon(
-                        Icons.Default.Send,
+                        Icons.AutoMirrored.Filled.Send,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp)
                     )
@@ -1292,7 +1293,7 @@ private fun getFileIcon(filename: String): ImageVector {
         "mp3", "flac", "wav", "m4a" -> Icons.Default.MusicNote
         "pdf", "doc", "docx", "txt", "md" -> Icons.Default.Description
         "zip", "tar", "gz", "7z", "apk" -> Icons.Default.FolderZip
-        else -> Icons.Default.InsertDriveFile
+        else -> Icons.AutoMirrored.Filled.InsertDriveFile
     }
 }
 
@@ -1357,7 +1358,7 @@ fun TargetDeviceSelectionDialog(
                                     )
                                 }
                                 Icon(
-                                    Icons.Default.ArrowForward,
+                                    Icons.AutoMirrored.Filled.ArrowForward,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
@@ -2020,6 +2021,7 @@ suspend fun sendFileUriToPeer(
                 return@withContext
             }
 
+            var lastProgressUiMs = 0L
             val uploadResult = app.client.uploadFileStreamWithMetrics(
                 targetIp = peer.ip,
                 targetPort = peer.port,
@@ -2028,8 +2030,12 @@ suspend fun sendFileUriToPeer(
                 totalBytes = fileSize,
                 inputStream = inputStream
             ) { bytes: Long, total: Long, pct: Int, speedMBps: Double, etaSeconds: Long ->
-                scopeLaunchMain {
-                    onState(TransferProgressState.Transferring(true, peer.name, fileName, bytes, total, pct, speedMBps, etaSeconds))
+                val now = System.currentTimeMillis()
+                if (now - lastProgressUiMs >= 64L || bytes >= total) {
+                    lastProgressUiMs = now
+                    scopeLaunchMain {
+                        onState(TransferProgressState.Transferring(true, peer.name, fileName, bytes, total, pct, speedMBps, etaSeconds))
+                    }
                 }
             }
 
@@ -2445,7 +2451,7 @@ fun StealthActionDock(
                 contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
                 Icon(
-                    Icons.Default.Send,
+                    Icons.AutoMirrored.Filled.Send,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )

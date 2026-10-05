@@ -47,7 +47,6 @@ class NetworkConnectivityWatcher(private val context: Context) {
         updateCurrentState()
 
         val builder = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
             .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
@@ -127,7 +126,7 @@ class NetworkConnectivityWatcher(private val context: Context) {
         val activeNetwork = cm.activeNetwork ?: return NetworkState()
         val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return NetworkState()
 
-        val isConnected = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         val type = when {
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> ConnectionType.WIFI
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> ConnectionType.ETHERNET
@@ -138,11 +137,13 @@ class NetworkConnectivityWatcher(private val context: Context) {
         val isLan = type == ConnectionType.WIFI || type == ConnectionType.ETHERNET
         val isMetered = !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         val localIp = NetworkUtils.getLocalIpAddress()
+        val isLanAvailable = isLan && localIp != "127.0.0.1"
+        val isConnected = hasInternet || isLanAvailable
 
         return NetworkState(
             isConnected = isConnected,
             connectionType = type,
-            isLanAvailable = isLan && localIp != "127.0.0.1",
+            isLanAvailable = isLanAvailable,
             isMetered = isMetered,
             localIp = localIp
         )

@@ -193,14 +193,22 @@ data class OmaIdentity(
          */
         fun encryptString(plaintext: String, omaId: String): String {
             val encrypted = encryptPayload(plaintext.toByteArray(Charsets.UTF_8), omaId)
-            return Base64.getEncoder().encodeToString(encrypted)
+            return try {
+                android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP)
+            } catch (_: Throwable) {
+                Base64.getEncoder().encodeToString(encrypted)
+            }
         }
 
         /**
          * String helper: Decrypts Base64 AES-256-GCM ciphertext to plaintext string.
          */
         fun decryptString(encryptedBase64: String, omaId: String): String {
-            val bytes = Base64.getDecoder().decode(encryptedBase64)
+            val bytes = try {
+                android.util.Base64.decode(encryptedBase64.trim(), android.util.Base64.DEFAULT)
+            } catch (_: Throwable) {
+                Base64.getDecoder().decode(encryptedBase64.trim())
+            }
             val decrypted = decryptPayload(bytes, omaId)
             return String(decrypted, Charsets.UTF_8)
         }

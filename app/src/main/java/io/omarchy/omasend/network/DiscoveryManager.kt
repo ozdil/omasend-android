@@ -33,6 +33,10 @@ class DiscoveryManager(private val context: Context) {
     private var broadcastJob: Job? = null
     private var listenJob: Job? = null
     private var cleanupJob: Job? = null
+    @Volatile
+    private var activeListenSocket: DatagramSocket? = null
+    @Volatile
+    private var activeBroadcastSocket: DatagramSocket? = null
 
     private val json = Json {
         encodeDefaults = true
@@ -479,6 +483,10 @@ class DiscoveryManager(private val context: Context) {
         broadcastJob = null
         listenJob = null
         cleanupJob = null
+        try { activeListenSocket?.close() } catch (_: Exception) {}
+        try { activeBroadcastSocket?.close() } catch (_: Exception) {}
+        activeListenSocket = null
+        activeBroadcastSocket = null
         releaseLocks()
         // Retain manual peers if any, but clear discovered peers so UI reflects paused state
         val manualPeers = peerMap.values.filter { it.id.startsWith("manual_") }
@@ -519,6 +527,7 @@ class DiscoveryManager(private val context: Context) {
                     reuseAddress = true
                     soTimeout = 2000 // Non-blocking periodic check for isActive
                 }
+                activeListenSocket = socket
                 val buffer = ByteArray(2048)
                 val packet = DatagramPacket(buffer, buffer.size)
                 val magicBytes = "OMASEND_P2P".toByteArray(Charsets.UTF_8)
@@ -598,7 +607,8 @@ class DiscoveryManager(private val context: Context) {
                 }
             } catch (_: Exception) {
             } finally {
-                socket?.close()
+                activeListenSocket = null
+                try { socket?.close() } catch (_: Exception) {}
             }
         }
     }
@@ -611,6 +621,7 @@ class DiscoveryManager(private val context: Context) {
                 socket = DatagramSocket().apply {
                     broadcast = true
                 }
+                activeBroadcastSocket = socket
 
                 while (isActive) {
                     val myIp = NetworkUtils.getLocalIpAddress()
@@ -646,7 +657,8 @@ class DiscoveryManager(private val context: Context) {
                 }
             } catch (_: Exception) {
             } finally {
-                socket?.close()
+                activeBroadcastSocket = null
+                try { socket?.close() } catch (_: Exception) {}
             }
         }
     }
