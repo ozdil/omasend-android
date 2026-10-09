@@ -15,8 +15,8 @@ android {
         applicationId = "io.omarchy.omasend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 51
-        versionName = "1.8.3"
+        versionCode = 55
+        versionName = "1.8.4"
     }
 
     val keystorePropsFile: File? = listOf(
