@@ -215,6 +215,7 @@ class ClipboardVault private constructor(private val context: Context) {
 
     fun processIncomingClipboard(text: String, senderName: String): ClipboardEntry? {
         if (text.isBlank()) return null
+        if (isSensitivePayload(text)) return null
         updateLastReceivedHash(text)
         return addEntry(text = text, senderName = senderName, isMine = false, contentType = "text")
     }
@@ -315,13 +316,71 @@ class ClipboardVault private constructor(private val context: Context) {
         }
     }
 
+    fun isSensitivePayload(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+
+        // 1. Private keys and certificates
+        if (t.contains("BEGIN PRIVATE KEY") ||
+            t.contains("BEGIN RSA PRIVATE KEY") ||
+            t.contains("BEGIN OPENSSH PRIVATE KEY") ||
+            t.contains("BEGIN PGP PRIVATE KEY") ||
+            t.contains("BEGIN CERTIFICATE")
+        ) {
+            return true
+        }
+
+        // 2. High entropy API tokens and cloud credentials
+        if (t.startsWith("ghp_") || t.startsWith("gho_") || t.startsWith("ghu_") || t.startsWith("ghs_") ||
+            t.startsWith("glpat-") || t.startsWith("sk_live_") || t.startsWith("rk_live_") ||
+            t.startsWith("AIzaSy") || t.startsWith("AKIA") || t.startsWith("ASIA") ||
+            t.startsWith("xoxb-") || t.startsWith("xoxp-") ||
+            (t.startsWith("eyJ") && t.count { it == '.' } == 2)
+        ) {
+            return true
+        }
+
+        // 3. BIP-39 12/24 word mnemonic recovery seed phrases
+        val words = t.split("\\s+".toRegex())
+        if ((words.size == 12 || words.size == 24) && words.all { it.all { c -> c in 'a'..'z' } }) {
+            return true
+        }
+
+        // 4. Typical high-entropy password/token heuristic (20-128 chars without spaces)
+        if (!t.contains(' ') && !t.contains('\n') && !t.contains('/') && !t.contains('.') && t.length in 20..128) {
+            val hasUpper = t.any { it.isUpperCase() }
+            val hasLower = t.any { it.isLowerCase() }
+            val hasDigit = t.any { it.isDigit() }
+            val hasSpecial = t.any { "!@#$%^&*()-_=+[]{}|;:,<>?".contains(it) }
+            if (hasUpper && hasLower && hasDigit && hasSpecial) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     fun processLocalClipboard(context: Context, app: OmaSendApp) {
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
             val clip = clipboard.primaryClip ?: return
             if (clip.itemCount == 0) return
+
+            // Sensitive Clipboard Shield: Android 13+ EXTRA_IS_SENSITIVE check
+            val desc = clip.description
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                if (desc.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true) {
+                    return
+                }
+            }
+
             val text = clip.getItemAt(0)?.text?.toString() ?: return
             if (text.isBlank()) return
+
+            // Sensitive Clipboard Shield: Pattern heuristics
+            if (isSensitivePayload(text)) {
+                return
+            }
 
             val hash = computeHash(text)
             if (isKnownHash(hash)) {

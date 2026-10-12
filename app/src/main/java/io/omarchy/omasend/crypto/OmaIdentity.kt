@@ -201,6 +201,54 @@ data class OmaIdentity(
         }
 
         /**
+         * Derives a pairwise session key between two OmaIDs using symmetric HKDF
+         * 100% byte-compatible with Linux rendezvous.rs derive_p2p_session_key
+         */
+        fun deriveP2pSessionKey(localOmaId: String, remoteOmaId: String): SecretKeySpec {
+            val normLocal = unformat(localOmaId)
+            val normRemote = unformat(remoteOmaId)
+            val (first, second) = if (normLocal <= normRemote) Pair(normLocal, normRemote) else Pair(normRemote, normLocal)
+            val ikm = (first + second).toByteArray(Charsets.UTF_8)
+            val rawKey = hkdfSha256(
+                ikm,
+                "omasend-p2p-noise-salt-v2".toByteArray(Charsets.UTF_8),
+                "omasend-p2p-chacha-aes-tunnel-v2".toByteArray(Charsets.UTF_8)
+            )
+            return SecretKeySpec(rawKey, "AES")
+        }
+
+        /**
+         * Encrypts plaintext bytes using pairwise P2P AES-256-GCM
+         */
+        fun encryptP2pPayload(plaintext: ByteArray, localOmaId: String, remoteOmaId: String): ByteArray {
+            val key = deriveP2pSessionKey(localOmaId, remoteOmaId)
+            val iv = ByteArray(12)
+            SecureRandom().nextBytes(iv)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+            val ciphertext = cipher.doFinal(plaintext)
+            val output = ByteArray(12 + ciphertext.size)
+            System.arraycopy(iv, 0, output, 0, 12)
+            System.arraycopy(ciphertext, 0, output, 12, ciphertext.size)
+            return output
+        }
+
+        /**
+         * Decrypts ciphertext bytes using pairwise P2P AES-256-GCM
+         */
+        fun decryptP2pPayload(ciphertextWithIv: ByteArray, localOmaId: String, remoteOmaId: String): ByteArray {
+            if (ciphertextWithIv.size < 28) {
+                throw IllegalArgumentException("P2P ciphertext payload too short")
+            }
+            val key = deriveP2pSessionKey(localOmaId, remoteOmaId)
+            val iv = ciphertextWithIv.copyOfRange(0, 12)
+            val ciphertext = ciphertextWithIv.copyOfRange(12, ciphertextWithIv.size)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+            return cipher.doFinal(ciphertext)
+        }
+
+        /**
          * String helper: Decrypts Base64 AES-256-GCM ciphertext to plaintext string.
          */
         fun decryptString(encryptedBase64: String, omaId: String): String {
