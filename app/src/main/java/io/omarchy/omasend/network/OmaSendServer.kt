@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.model.ClipboardPayload
 import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.model.TransferRequest
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -39,10 +41,37 @@ class OmaSendServer(private val context: Context) {
         val prompt: IncomingTransferPrompt,
         val expiresAt: Long,
         var status: String, // "PENDING", "ACCEPTED", "REJECTED"
-        val remainingFiles: AtomicInteger = AtomicInteger(prompt.files.size.coerceAtLeast(1))
+        val remainingFiles: AtomicInteger = AtomicInteger(prompt.files.size.coerceAtLeast(1)),
+        /** v2: key of the verified sender; uploads must be signed by the same key. */
+        val senderPk: String? = null
     )
 
     private val pendingTransfers = ConcurrentHashMap<String, PendingState>()
+
+    // Protocol v2 (Phase 1): QR-paired Ed25519 device keys.
+    private val trustStore by lazy { DeviceKey.TrustStore(context) }
+    private val deviceIdentity by lazy { DeviceKey.identity(context) }
+    var onDevicePaired: ((String) -> Unit)? = null
+
+    private fun v2Verify(headers: Map<String, String>, method: String, pathAndQuery: String, bodyTag: String, peerIp: String) =
+        DeviceKey.verifyRequest(trustStore, headers, method, pathAndQuery, bodyTag, peerIp)
+
+    private fun readBodyBounded(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): ByteArray? {
+        if (contentLength < 0 || contentLength > max) return null
+        val bytes = ByteArray(contentLength.toInt())
+        var total = 0
+        while (total < bytes.size) {
+            if (System.currentTimeMillis() > deadlineMs) return null
+            val r = try {
+                input.read(bytes, total, bytes.size - total)
+            } catch (_: java.net.SocketTimeoutException) {
+                continue
+            }
+            if (r == -1) return null
+            total += r
+        }
+        return bytes
+    }
 
     var onIncomingTransferPrompt: ((IncomingTransferPrompt) -> Unit)? = null
     var onClipboardReceived: ((senderName: String, text: String) -> Unit)? = null
@@ -276,7 +305,7 @@ class OmaSendServer(private val context: Context) {
             // V2-SEC-01: a claimed same-owner OmaID no longer bypasses this.
             val currentMode = getDiscoveryMode?.invoke()
             if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF &&
-                path != "/api/status"
+                path != "/api/status" && path != "/api/v2/pair"
             ) {
                 sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Visibility is Off\"}")
                 return
@@ -288,17 +317,20 @@ class OmaSendServer(private val context: Context) {
                 path == "/api/status" || path == "/api/p2p/ping" -> {
                     handlePing(output)
                 }
+                method == "POST" && path == "/api/v2/pair" -> {
+                    handlePairV2(input, output, contentLength, peerIp, remainingDeadline)
+                }
                 method == "POST" && path == "/api/p2p/request" -> {
-                    handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline)
+                    handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
                 }
                 method == "GET" && path == "/api/p2p/decision" -> {
                     handleDecisionQuery(output, query)
                 }
                 method == "POST" && path == "/api/p2p/upload" -> {
-                    handleFileUpload(socket, input, output, query, contentLength)
+                    handleFileUpload(socket, input, output, query, contentLength, headers, peerIp, fullPath)
                 }
                 method == "POST" && path == "/api/p2p/clipboard" -> {
-                    handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline)
+                    handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline, fullPath)
                 }
                 method == "GET" && path == "/api/p2p/clipboard/image" -> {
                     handleClipboardImageDownload(output, headers, query, peerIp)
@@ -333,7 +365,8 @@ class OmaSendServer(private val context: Context) {
         headers: Map<String, String>,
         contentLength: Long,
         peerIp: String,
-        deadlineMs: Long
+        deadlineMs: Long,
+        pathAndQuery: String = "/api/p2p/request"
     ) {
         if (contentLength <= 0 || contentLength > MAX_CONTROL_BODY) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
@@ -379,8 +412,15 @@ class OmaSendServer(private val context: Context) {
 
             val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
 
-            // Reject unauthenticated WAN transfer requests unless paired OmaID
-            if (!isPrivatePeer && !isPairedOrKnownOmaId(senderOmaId)) {
+            val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
+            if (v2 is DeviceKey.AuthResult.Rejected) {
+                sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
+                return
+            }
+            val verifiedKey = (v2 as? DeviceKey.AuthResult.Trusted)?.key
+
+            // Reject unauthenticated WAN transfer requests unless verified device key or paired OmaID
+            if (!isPrivatePeer && verifiedKey == null && !isPairedOrKnownOmaId(senderOmaId)) {
                 sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"WAN transfer requires verified OmaID\"}")
                 return
             }
@@ -393,18 +433,30 @@ class OmaSendServer(private val context: Context) {
             val prompt = IncomingTransferPrompt(
                 token = token,
                 senderId = req.sender_id,
-                senderName = req.sender_name,
+                senderName = verifiedKey?.name ?: req.sender_name,
                 senderIp = req.sender_ip.ifBlank { peerIp },
                 files = req.files,
                 totalSizeBytes = req.total_size_bytes
             )
 
-            // V2-SEC-01 interim fix: no zero-click auto-accept for a claimed same-owner OmaID.
-            // Every transfer waits for the user's decision.
+            // Phase 1: only a cryptographically verified key that was QR-paired as "own device"
+            // may auto-accept. A claimed OmaID never does.
+            if (verifiedKey != null && verifiedKey.own_device) {
+                pendingTransfers[token] = PendingState(
+                    prompt = prompt,
+                    expiresAt = System.currentTimeMillis() + 600000L,
+                    status = "ACCEPTED",
+                    senderPk = verifiedKey.pk
+                )
+                sendResponse(output, 200, "OK", "application/json", """{"status":"ACCEPTED","token":"$token","verified_device":true}""")
+                return
+            }
+
             pendingTransfers[token] = PendingState(
                 prompt = prompt,
                 expiresAt = System.currentTimeMillis() + 30000L,
-                status = "PENDING"
+                status = "PENDING",
+                senderPk = verifiedKey?.pk
             )
 
             Handler(Looper.getMainLooper()).post {
@@ -436,7 +488,16 @@ class OmaSendServer(private val context: Context) {
         sendResponse(output, 200, "OK", "application/json", resp)
     }
 
-    private fun handleFileUpload(socket: Socket, input: InputStream, output: OutputStream, query: String, contentLength: Long) {
+    private fun handleFileUpload(
+        socket: Socket,
+        input: InputStream,
+        output: OutputStream,
+        query: String,
+        contentLength: Long,
+        headers: Map<String, String> = emptyMap(),
+        peerIp: String = "",
+        pathAndQuery: String = ""
+    ) {
         val token = getQueryParam(query, "token")
         val filenameRaw = getQueryParam(query, "filename")
         val filename = try {
@@ -454,6 +515,14 @@ class OmaSendServer(private val context: Context) {
         if (state == null || state.status != "ACCEPTED" || System.currentTimeMillis() > state.expiresAt) {
             sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized or expired transfer\"}")
             return
+        }
+
+        if (state.senderPk != null) {
+            val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagStream(contentLength), peerIp)
+            if (v2 !is DeviceKey.AuthResult.Trusted || v2.key.pk != state.senderPk) {
+                sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Upload must be signed by the device that requested the transfer\"}")
+                return
+            }
         }
 
         // Extend token expiration while active upload is in progress for multi-file batches
@@ -495,6 +564,29 @@ class OmaSendServer(private val context: Context) {
         }
     }
 
+    private fun handlePairV2(input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
+        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
+        if (body == null) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
+            return
+        }
+        val obj = try {
+            json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
+        } catch (_: Exception) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp)
+            .onSuccess { (resp, key) ->
+                trustStore.upsert(key)
+                Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }
+                sendResponse(output, 200, "OK", "application/json", resp.toString())
+            }
+            .onFailure {
+                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"${(it.message ?: "Pairing failed").replace("\"", "'")}\"}")
+            }
+    }
+
     private fun isAuthRateLimited(peerIp: String): Boolean {
         val now = System.currentTimeMillis()
         val rec = failedAuthAttempts[peerIp] ?: return false
@@ -533,7 +625,8 @@ class OmaSendServer(private val context: Context) {
         query: String,
         contentLength: Long,
         peerIp: String,
-        deadlineMs: Long
+        deadlineMs: Long,
+        pathAndQuery: String = "/api/p2p/clipboard"
     ) {
         // 1. Rate-limiting check: reject blocked IP immediately
         if (isAuthRateLimited(peerIp)) {
@@ -617,7 +710,14 @@ class OmaSendServer(private val context: Context) {
         // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
         val isPairedPeer = isPairedOmaIdAtIp(candidateOmaId, peerIp)
 
-        val isAuthorized = isPairedPeer || isPinValid || isKeyValid || isTokenValid
+        val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
+        if (v2 is DeviceKey.AuthResult.Rejected) {
+            sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
+            return
+        }
+        val isVerifiedDevice = v2 is DeviceKey.AuthResult.Trusted
+
+        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid || isTokenValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)

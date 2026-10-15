@@ -12,7 +12,9 @@ import com.google.zxing.common.HybridBinarizer
 import java.nio.ByteBuffer
 
 class OmaIdQrAnalyzer(
-    private val onOmaIdDetected: (String) -> Unit
+    private val onOmaIdDetected: (String) -> Unit,
+    /** Protocol v2 pairing QR codes (omasend://pair?v=2...). */
+    private val onPairUriDetected: ((String) -> Unit)? = null
 ) : ImageAnalysis.Analyzer {
 
     private val reader = MultiFormatReader().apply {
@@ -59,7 +61,12 @@ class OmaIdQrAnalyzer(
                 val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
                 val result = reader.decodeWithState(binaryBitmap)
 
-                if (result != null && !result.text.isNullOrBlank()) {
+                if (result != null && !result.text.isNullOrBlank() && onPairUriDetected != null &&
+                    io.omarchy.omasend.crypto.DeviceKey.isPairUri(result.text)
+                ) {
+                    isPaused = true
+                    onPairUriDetected.invoke(result.text.trim())
+                } else if (result != null && !result.text.isNullOrBlank()) {
                     val candidate = GalleryQrDecoder.parseOmaIdFromScannedPayload(result.text)
                     if (candidate != null) {
                         isPaused = true

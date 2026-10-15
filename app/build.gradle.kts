@@ -96,6 +96,8 @@ dependencies {
   implementation(libs.okhttp)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.zxing.core)
+  // Ed25519 for protocol v2 device keys (platform JCA has no Ed25519 below API 33)
+  implementation(libs.bouncycastle.bcprov)
 
   // CameraX for Zero-GMS QR/Barcode Scanning
   implementation(libs.androidx.camera.core)

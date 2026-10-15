@@ -399,12 +399,20 @@ class ClipboardVault private constructor(private val context: Context) {
                 peer.omaId.isNotBlank() &&
                     app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true
             }.distinctBy { it.ip }
-            if (authorizedPeers.isNotEmpty()) {
+            // Phase 1: QR-paired devices (verified keys) at the IP of their last signed request.
+            val keyTargets = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load()
+                .filter { it.ip.isNotBlank() && authorizedPeers.none { p -> p.ip == it.ip } }
+            if (authorizedPeers.isNotEmpty() || keyTargets.isNotEmpty()) {
                 scope.launch {
                     for (peer in authorizedPeers) {
                         if (peer.transport == "BT" || peer.ip.startsWith("bt:") || peer.port <= 0) continue
                         try {
                             app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
+                        } catch (_: Exception) {}
+                    }
+                    for (k in keyTargets) {
+                        try {
+                            app.client.sendClipboard(k.ip, if (k.port > 0) k.port else NetworkUtils.PORT, text, "")
                         } catch (_: Exception) {}
                     }
                 }

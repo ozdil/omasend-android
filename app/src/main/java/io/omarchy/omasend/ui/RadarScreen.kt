@@ -614,6 +614,21 @@ fun RadarScreen(
     if (showQrScannerDialog) {
         OmaQrScannerDialog(
             onDismissRequest = { showQrScannerDialog = false },
+            onPairUriScanned = { uri ->
+                showQrScannerDialog = false
+                scope.launch {
+                    val result = kotlinx.coroutines.withContext(Dispatchers.IO) { app.client.pairWithUri(uri) }
+                    result.onSuccess { k ->
+                        Toast.makeText(
+                            context,
+                            "Cihaz eşleşti: ${k.name} (${k.device_id})" + if (k.own_device) " • Kendi cihazın" else "",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }.onFailure { e ->
+                        Toast.makeText(context, "Eşleşme başarısız: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
             onOmaIdConnected = { scannedId ->
                 showQrScannerDialog = false
                 scope.launch {

@@ -1,6 +1,7 @@
 package io.omarchy.omasend.network
 
 import android.content.Context
+import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.model.ClipboardPayload
 import io.omarchy.omasend.model.TransferDecision
 import io.omarchy.omasend.model.TransferFileInfo
@@ -9,6 +10,7 @@ import io.omarchy.omasend.model.TransferResponse
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -50,7 +52,29 @@ class OmaSendClient(private val context: Context) {
         encodeDefaults = true
         ignoreUnknownKeys = true
     }
+    /**
+     * Protocol v2: signs every outgoing request with this device's Ed25519 key.
+     * Uploads sign "stream:<length>" so multi-GB bodies are not buffered.
+     */
+    private val v2SigningInterceptor = Interceptor { chain ->
+        val req = chain.request()
+        val url = req.url
+        val pathAndQuery = url.encodedPath + (url.encodedQuery?.let { "?$it" } ?: "")
+        val body = req.body
+        val tag = if (url.encodedPath == "/api/p2p/upload") {
+            DeviceKey.bodyTagStream(body?.contentLength() ?: 0L)
+        } else {
+            val buf = okio.Buffer()
+            body?.writeTo(buf)
+            DeviceKey.bodyTagJson(buf.readByteArray())
+        }
+        val signed = req.newBuilder()
+        DeviceKey.authHeaders(DeviceKey.identity(context), req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
+        chain.proceed(signed.build())
+    }
+
     private val client = OkHttpClient.Builder()
+        .addInterceptor(v2SigningInterceptor)
         .socketFactory(HighPerfSocketFactory())
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -84,6 +108,43 @@ class OmaSendClient(private val context: Context) {
             if (knownWanPeer) return true
         }
         return false
+    }
+
+    /**
+     * Protocol v2 initiator: pair with the device whose QR code (omasend://pair?...) was scanned.
+     * The responder's key is pinned from the QR code, so a LAN attacker cannot impersonate it.
+     */
+    fun pairWithUri(uri: String): Result<DeviceKey.TrustedKey> = runCatching {
+        val offer = DeviceKey.parsePairUri(uri).getOrThrow()
+        require(NetworkUtils.isPrivateOrLocalIp(offer.host)) { "Pairing is only allowed on the local network" }
+        val id = DeviceKey.identity(context)
+        val body = DeviceKey.buildPairRequest(id, offer, NetworkUtils.getDeviceName(context)).toString()
+        val request = Request.Builder()
+            .url("http://${offer.host}:${offer.port}/api/v2/pair")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string() ?: error("Empty response")
+            val obj = json.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject ?: error("Malformed response")
+            if (!response.isSuccessful) {
+                error((obj["error"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Pairing rejected (${response.code})")
+            }
+            DeviceKey.verifyPairResponse(id, offer, obj).getOrThrow()
+            val name = ((obj["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: offer.name).ifBlank { offer.name }.take(64)
+            val now = DeviceKey.nowSecs()
+            val key = DeviceKey.TrustedKey(
+                pk = offer.pk,
+                device_id = DeviceKey.deviceIdForPk(DeviceKey.decodePk(offer.pk)!!),
+                name = name,
+                ip = offer.host,
+                port = offer.port,
+                own_device = offer.ownDevice,
+                added_at = now,
+                last_seen = now
+            )
+            DeviceKey.TrustStore(context).upsert(key)
+            key
+        }
     }
 
     fun sendTransferRequest(

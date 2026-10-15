@@ -58,7 +58,8 @@ import java.util.concurrent.Executors
 @Composable
 fun OmaQrScannerDialog(
     onDismissRequest: () -> Unit,
-    onOmaIdConnected: (String) -> Unit
+    onOmaIdConnected: (String) -> Unit,
+    onPairUriScanned: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -101,13 +102,26 @@ fun OmaQrScannerDialog(
     }
 
     val analyzer = remember {
-        OmaIdQrAnalyzer { id ->
-            if (isScanningActive && detectedOmaId == null) {
-                detectedOmaId = id
-                isScanningActive = false
-                OmaHapticController(context).onClipboardReceived()
+        OmaIdQrAnalyzer(
+            onOmaIdDetected = { id ->
+                if (isScanningActive && detectedOmaId == null) {
+                    detectedOmaId = id
+                    isScanningActive = false
+                    OmaHapticController(context).onClipboardReceived()
+                }
+            },
+            onPairUriDetected = onPairUriScanned?.let { cb ->
+                { uri: String ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (isScanningActive) {
+                            isScanningActive = false
+                            OmaHapticController(context).onClipboardReceived()
+                            cb(uri)
+                        }
+                    }
+                }
             }
-        }
+        )
     }
 
     val galleryPickerLauncher = rememberLauncherForActivityResult(
@@ -250,7 +264,10 @@ fun OmaQrScannerDialog(
                     if (clip != null && clip.itemCount > 0) {
                         val text = clip.getItemAt(0).text?.toString() ?: ""
                         val parsed = GalleryQrDecoder.parseOmaIdFromScannedPayload(text)
-                        if (parsed != null) {
+                        if (onPairUriScanned != null && io.omarchy.omasend.crypto.DeviceKey.isPairUri(text)) {
+                            isScanningActive = false
+                            onPairUriScanned(text.trim())
+                        } else if (parsed != null) {
                             detectedOmaId = parsed
                             isScanningActive = false
                             OmaHapticController(context).onClipboardReceived()
