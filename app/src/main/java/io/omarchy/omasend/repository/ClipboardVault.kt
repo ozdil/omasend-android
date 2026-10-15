@@ -391,11 +391,14 @@ class ClipboardVault private constructor(private val context: Context) {
             val deviceName = NetworkUtils.getDeviceName(context)
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 
+            // V2-SEC-02 interim fix: isSameOwner/isTrusted come from unauthenticated beacons and can be
+            // spoofed to exfiltrate the clipboard. Push only to paired OmaIDs, and only at the IP stored
+            // when the user paired them (beacons can no longer change that IP).
             val peers = app.discoveryManager.peers.value
             val authorizedPeers = peers.filter { peer ->
-                peer.isSameOwner || peer.isTrusted ||
-                    (peer.omaId.isNotBlank() && app.discoveryManager.isOmaIdPaired(peer.omaId))
-            }
+                peer.omaId.isNotBlank() &&
+                    app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true
+            }.distinctBy { it.ip }
             if (authorizedPeers.isNotEmpty()) {
                 scope.launch {
                     for (peer in authorizedPeers) {

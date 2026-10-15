@@ -165,31 +165,20 @@ class OmaSendServer(private val context: Context) {
 
     var getDiscoveryMode: (() -> io.omarchy.omasend.model.DiscoveryMode)? = null
 
-    private fun getLocalOmaId(): String {
-        return try {
-            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-            app?.omaIdentity?.formattedId ?: io.omarchy.omasend.crypto.OmaIdentity.getOrGenerate(context).formattedId
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun isSameOwnerOmaId(candidate: String?): Boolean {
-        if (candidate.isNullOrBlank()) return false
-        val local = io.omarchy.omasend.crypto.OmaIdentity.unformat(getLocalOmaId())
-        val remote = io.omarchy.omasend.crypto.OmaIdentity.unformat(candidate)
-        if (local.length != 16 || remote.length != 16) return false
-        return java.security.MessageDigest.isEqual(
-            local.toByteArray(Charsets.UTF_8),
-            remote.toByteArray(Charsets.UTF_8)
-        )
-    }
-
+    // V2-SEC-01 interim fix: OmaID is broadcast in beacons and headers, so a claimed OmaID
+    // (including our own) proves nothing. Only explicitly paired OmaIDs count here.
     private fun isPairedOrKnownOmaId(candidate: String?): Boolean {
         if (candidate.isNullOrBlank()) return false
-        if (isSameOwnerOmaId(candidate)) return true
         val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
         return app?.discoveryManager?.isOmaIdPaired(candidate) == true
+    }
+
+    // Paired OmaID AND the request comes from the IP stored at pairing time.
+    private fun isPairedOmaIdAtIp(candidate: String?, peerIp: String): Boolean {
+        if (candidate.isNullOrBlank() || peerIp.isBlank()) return false
+        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+        val savedIp = app?.discoveryManager?.getPairedIp(candidate) ?: return false
+        return savedIp == peerIp
     }
 
     private fun handleClient(socket: Socket, peerIp: String) {
@@ -283,11 +272,11 @@ class OmaSendServer(private val context: Context) {
                 return
             }
 
-            // Early Visibility Check: reject connections if visibility is turned OFF (except same owner OmaID)
+            // Early Visibility Check: reject connections if visibility is turned OFF.
+            // V2-SEC-01: a claimed same-owner OmaID no longer bypasses this.
             val currentMode = getDiscoveryMode?.invoke()
             if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF &&
-                path != "/api/status" &&
-                !isSameOwnerOmaId(headerOmaId)
+                path != "/api/status"
             ) {
                 sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Visibility is Off\"}")
                 return
@@ -328,14 +317,11 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handlePing(output: OutputStream) {
-        val myOmaId = getLocalOmaId()
+        // V2-INFO-01: unauthenticated status must not reveal OmaID, device id or device name.
         val resp = """
             {
                 "status": "OK",
-                "id": "${NetworkUtils.getDeviceId(context)}",
-                "name": "${NetworkUtils.getDeviceName(context)}",
-                "mode": "ALL",
-                "oma_id": "$myOmaId"
+                "mode": "ALL"
             }
         """.trimIndent()
         sendResponse(output, 200, "OK", "application/json", resp)
@@ -391,11 +377,10 @@ class OmaSendServer(private val context: Context) {
                 else -> ""
             }
 
-            val isSameOwner = isSameOwnerOmaId(senderOmaId) || isSameOwnerOmaId(req.sender_id)
             val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
 
-            // Reject unauthenticated WAN transfer requests unless same owner or paired OmaID
-            if (!isPrivatePeer && !isSameOwner && !isPairedOrKnownOmaId(senderOmaId)) {
+            // Reject unauthenticated WAN transfer requests unless paired OmaID
+            if (!isPrivatePeer && !isPairedOrKnownOmaId(senderOmaId)) {
                 sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"WAN transfer requires verified OmaID\"}")
                 return
             }
@@ -414,19 +399,8 @@ class OmaSendServer(private val context: Context) {
                 totalSizeBytes = req.total_size_bytes
             )
 
-            // Anonymous Numbered OmaID Zero-Click Model: Auto-accept immediately if sender shares the same OmaID!
-            if (isSameOwner) {
-                addTrustedPeer(req.sender_id)
-                pendingTransfers[token] = PendingState(
-                    prompt = prompt,
-                    expiresAt = System.currentTimeMillis() + 60000L,
-                    status = "ACCEPTED"
-                )
-                val resp = """{"status":"ACCEPTED","token":"$token"}"""
-                sendResponse(output, 200, "OK", "application/json", resp)
-                return
-            }
-
+            // V2-SEC-01 interim fix: no zero-click auto-accept for a claimed same-owner OmaID.
+            // Every transfer waits for the user's decision.
             pendingTransfers[token] = PendingState(
                 prompt = prompt,
                 expiresAt = System.currentTimeMillis() + 30000L,
@@ -620,8 +594,6 @@ class OmaSendServer(private val context: Context) {
             io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
             else -> ""
         }
-        val isSameOwner = isSameOwnerOmaId(candidateOmaId) || isSameOwnerOmaId(payload.sender_id)
-
         val providedPin = headers["x-omasend-pin"]
             ?: getQueryParam(query, "pin").ifBlank { null }
             ?: payload.pin
@@ -641,10 +613,11 @@ class OmaSendServer(private val context: Context) {
             pendingTransfers[providedKey]?.status == "ACCEPTED" &&
             System.currentTimeMillis() <= (pendingTransfers[providedKey]?.expiresAt ?: 0L)
 
-        val isTrustedPeer = !payload.sender_id.isBlank() && isPeerTrusted(payload.sender_id)
-        val isPairedPeer = isPairedOrKnownOmaId(candidateOmaId)
+        // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
+        // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
+        val isPairedPeer = isPairedOmaIdAtIp(candidateOmaId, peerIp)
 
-        val isAuthorized = isSameOwner || isPairedPeer || isPinValid || isKeyValid || isTokenValid || isTrustedPeer
+        val isAuthorized = isPairedPeer || isPinValid || isKeyValid || isTokenValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -670,9 +643,6 @@ class OmaSendServer(private val context: Context) {
 
         // Authorized: reset failed attempts
         recordAuthAttempt(peerIp, true)
-        if (isSameOwner && payload.sender_id.isNotBlank()) {
-            addTrustedPeer(payload.sender_id)
-        }
 
         val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
         val vault = io.omarchy.omasend.repository.ClipboardVault.getInstance(context)

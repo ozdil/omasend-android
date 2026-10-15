@@ -111,6 +111,16 @@ class DiscoveryManager(private val context: Context) {
         return paired.any { OmaIdentity.unformat(it) == clean }
     }
 
+    /**
+     * Returns the IP stored when the user paired this OmaID, or null.
+     * V2-SEC-03: this value is never updated from unauthenticated discovery beacons.
+     */
+    fun getPairedIp(omaId: String): String? {
+        if (!isOmaIdPaired(omaId)) return null
+        val clean = OmaIdentity.unformat(omaId)
+        return pairedPrefs.getString("ip_$clean", null)?.trim()?.ifBlank { null }
+    }
+
     fun addPairedOmaId(omaId: String, name: String? = null, ip: String? = null) {
         if (!OmaIdentity.isValid(omaId)) return
         val formatted = OmaIdentity.format(omaId)
@@ -671,13 +681,8 @@ class DiscoveryManager(private val context: Context) {
                                     val senderIp = packetAddr.hostAddress ?: beacon.ip
                                     val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
 
-                                    if ((isSameOwner || isOmaIdPaired(peerOmaId)) && peerOmaId.isNotBlank() && senderIp.isNotBlank()) {
-                                        val clean = OmaIdentity.unformat(peerOmaId)
-                                        pairedPrefs.edit()
-                                            .putString("ip_$clean", senderIp)
-                                            .putString("name_$clean", beacon.name)
-                                            .apply()
-                                    }
+                                    // V2-SEC-03 interim fix: beacons are unauthenticated, so they must not
+                                    // overwrite the stored IP/name of a paired OmaID (traffic redirection).
 
                                     val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
                                     val peer = DiscoveredPeer(
