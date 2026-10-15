@@ -63,35 +63,77 @@ class OmaSendClient(private val context: Context) {
         .writeTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
+    private fun getLocalOmaId(): String {
+        return try {
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+            app?.omaIdentity?.formattedId ?: io.omarchy.omasend.crypto.OmaIdentity.getOrGenerate(context).formattedId
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun isAllowedTarget(targetIp: String, targetOmaId: String? = null, hasActiveToken: Boolean = false): Boolean {
+        if (NetworkUtils.isPrivateOrLocalIp(targetIp)) return true
+        if (hasActiveToken) return true
+        if (!targetOmaId.isNullOrBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(targetOmaId)) return true
+        val localOma = getLocalOmaId()
+        if (localOma.isNotBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(localOma)) {
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+            val knownWanPeer = app?.discoveryManager?.peers?.value?.any { it.ip == targetIp } == true ||
+                app?.wanDiscoveryEngine?.status?.value?.rendezvousPeers?.any { it.ip == targetIp } == true
+            if (knownWanPeer) return true
+        }
+        return false
+    }
+
     fun sendTransferRequest(
         targetIp: String,
         targetPort: Int,
-        files: List<TransferFileInfo>
+        files: List<TransferFileInfo>,
+        targetOmaId: String = ""
     ): Result<String> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        return sendTransferRequestWithStatus(targetIp, targetPort, files, targetOmaId).map { it.first }
+    }
+
+    /**
+     * Sends transfer request and returns Pair(token, status).
+     * When status == "ACCEPTED", Zero-Click Auto-Accept was triggered on the target peer.
+     */
+    fun sendTransferRequestWithStatus(
+        targetIp: String,
+        targetPort: Int,
+        files: List<TransferFileInfo>,
+        targetOmaId: String = ""
+    ): Result<Pair<String, String>> {
+        if (!isAllowedTarget(targetIp, targetOmaId)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope and not an authenticated OmaID session"))
         }
         return try {
+            val myOmaId = getLocalOmaId()
             val totalBytes = files.sumOf { it.size_bytes }
             val requestPayload = TransferRequest(
                 sender_id = NetworkUtils.getDeviceId(context),
                 sender_name = NetworkUtils.getDeviceName(context),
                 sender_ip = NetworkUtils.getLocalIpAddress(),
                 files = files,
-                total_size_bytes = totalBytes
+                total_size_bytes = totalBytes,
+                oma_id = myOmaId
             )
             val jsonBody = json.encodeToString(TransferRequest.serializer(), requestPayload)
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/request")
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-                .build()
 
-            client.newCall(request).execute().use { response ->
+            if (myOmaId.isNotBlank()) {
+                requestBuilder.header("X-OmaSend-OmaID", myOmaId)
+            }
+
+            client.newCall(requestBuilder.build()).execute().use { response ->
                 val respBody = response.body?.string() ?: return Result.failure(Exception("Empty response"))
                 val transferResp = json.decodeFromString<TransferResponse>(respBody)
 
                 if (transferResp.token != null) {
-                    Result.success(transferResp.token)
+                    Result.success(Pair(transferResp.token, transferResp.status))
                 } else {
                     Result.failure(Exception(transferResp.error ?: "Peer rejected transfer request"))
                 }
@@ -101,24 +143,44 @@ class OmaSendClient(private val context: Context) {
         }
     }
 
+    @Volatile
+    private var activeUploadCall: okhttp3.Call? = null
+
+    @Volatile
+    private var cancelRequested: Boolean = false
+
+    fun cancelActiveTransfer() {
+        cancelRequested = true
+        try {
+            activeUploadCall?.cancel()
+        } catch (_: Exception) {}
+    }
+
     suspend fun pollDecision(
         targetIp: String,
         targetPort: Int,
         token: String,
         timeoutSec: Int = 30
     ): Result<Boolean> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
+            return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
+        cancelRequested = false
+        val myOmaId = getLocalOmaId()
         val deadline = System.currentTimeMillis() + (timeoutSec * 1000L)
         while (System.currentTimeMillis() < deadline) {
+            if (cancelRequested) {
+                return Result.failure(Exception("Transfer kullanıcı tarafından iptal edildi."))
+            }
             try {
-                val request = Request.Builder()
+                val reqBuilder = Request.Builder()
                     .url("http://$targetIp:$targetPort/api/p2p/decision?token=$token")
                     .get()
-                    .build()
+                if (myOmaId.isNotBlank()) {
+                    reqBuilder.header("X-OmaSend-OmaID", myOmaId)
+                }
 
-                val decision = client.newCall(request).execute().use { response ->
+                val decision = client.newCall(reqBuilder.build()).execute().use { response ->
                     val respBody = response.body?.string() ?: ""
                     json.decodeFromString<TransferDecision>(respBody)
                 }
@@ -168,10 +230,13 @@ class OmaSendClient(private val context: Context) {
         inputStream: InputStream,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int, speedMBps: Double, etaSeconds: Long) -> Unit
     ): Result<Unit> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
+            try { inputStream.close() } catch (_: Exception) {}
+            return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
-        val speedCalculator = TransferSpeedCalculator(totalBytes)
+        cancelRequested = false
+        val myOmaId = getLocalOmaId()
+        val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
         val wifiLock = NetworkUtils.acquireHighPerfWifiLock(context, "OmaSend:ClientUpload")
         return try {
             val encodedName = URLEncoder.encode(filename, "UTF-8")
@@ -184,6 +249,9 @@ class OmaSendClient(private val context: Context) {
                     var uploaded = 0L
                     var read: Int
                     while (inputStream.read(buffer).also { read = it } != -1) {
+                        if (cancelRequested) {
+                            throw java.io.InterruptedIOException("Transfer kullanıcı tarafından iptal edildi.")
+                        }
                         sink.write(buffer, 0, read)
                         uploaded += read
                         val metrics = speedCalculator.update(uploaded)
@@ -193,12 +261,16 @@ class OmaSendClient(private val context: Context) {
                 }
             }
 
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/upload?token=$token&filename=$encodedName")
                 .post(countingBody)
-                .build()
+            if (myOmaId.isNotBlank()) {
+                requestBuilder.header("X-OmaSend-OmaID", myOmaId)
+            }
 
-            uploadClient.newCall(request).execute().use { response ->
+            val call = uploadClient.newCall(requestBuilder.build())
+            activeUploadCall = call
+            call.execute().use { response ->
                 if (response.isSuccessful) {
                     Result.success(Unit)
                 } else {
@@ -206,8 +278,13 @@ class OmaSendClient(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            if (cancelRequested) {
+                Result.failure(Exception("Transfer kullanıcı tarafından iptal edildi."))
+            } else {
+                Result.failure(e)
+            }
         } finally {
+            activeUploadCall = null
             NetworkUtils.releaseWifiLock(wifiLock)
             try {
                 inputStream.close()
@@ -219,28 +296,31 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboard(
         targetIp: String,
         targetPort: Int,
-        text: String
+        text: String,
+        targetOmaId: String = ""
     ): Result<Unit> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        if (!isAllowedTarget(targetIp, targetOmaId)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
         return try {
+            val myOmaId = getLocalOmaId()
             val payload = ClipboardPayload(
                 sender_id = NetworkUtils.getDeviceId(context),
                 sender_name = NetworkUtils.getDeviceName(context),
                 text = text,
-                pin = NetworkUtils.getDevicePin(context),
-                token = NetworkUtils.getDeviceSessionKey(context)
+                pin = null,
+                token = null,
+                oma_id = myOmaId
             )
             val jsonBody = json.encodeToString(ClipboardPayload.serializer(), payload)
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard")
-                .header("X-OmaSend-PIN", NetworkUtils.getDevicePin(context))
-                .header("X-OmaSend-Key", NetworkUtils.getDeviceSessionKey(context))
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-                .build()
+            if (myOmaId.isNotBlank()) {
+                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
+            }
 
-            client.newCall(request).execute().use { response ->
+            client.newCall(reqBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
                     Result.success(Unit)
                 } else {
@@ -255,27 +335,30 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboardPayload(
         targetIp: String,
         targetPort: Int,
-        payload: ClipboardPayload
+        payload: ClipboardPayload,
+        targetOmaId: String = ""
     ): Result<Unit> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        if (!isAllowedTarget(targetIp, targetOmaId)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
         return try {
+            val myOmaId = getLocalOmaId()
             val fullPayload = payload.copy(
                 sender_id = NetworkUtils.getDeviceId(context),
                 sender_name = NetworkUtils.getDeviceName(context),
-                pin = NetworkUtils.getDevicePin(context),
-                token = NetworkUtils.getDeviceSessionKey(context)
+                pin = null,
+                token = null,
+                oma_id = myOmaId
             )
             val jsonBody = json.encodeToString(ClipboardPayload.serializer(), fullPayload)
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard")
-                .header("X-OmaSend-PIN", NetworkUtils.getDevicePin(context))
-                .header("X-OmaSend-Key", NetworkUtils.getDeviceSessionKey(context))
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-                .build()
+            if (myOmaId.isNotBlank()) {
+                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
+            }
 
-            client.newCall(request).execute().use { response ->
+            client.newCall(reqBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
                     Result.success(Unit)
                 } else {
@@ -290,20 +373,22 @@ class OmaSendClient(private val context: Context) {
     fun fetchClipboardImage(
         targetIp: String,
         targetPort: Int,
-        hash: String
+        hash: String,
+        targetOmaId: String = ""
     ): Result<ByteArray> {
-        if (!NetworkUtils.isPrivateOrLocalIp(targetIp)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope (RFC 1918/3927)"))
+        if (!isAllowedTarget(targetIp, targetOmaId, hasActiveToken = true)) {
+            return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
         return try {
-            val request = Request.Builder()
+            val myOmaId = getLocalOmaId()
+            val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard/image?hash=$hash")
-                .header("X-OmaSend-PIN", NetworkUtils.getDevicePin(context))
-                .header("X-OmaSend-Key", NetworkUtils.getDeviceSessionKey(context))
                 .get()
-                .build()
+            if (myOmaId.isNotBlank()) {
+                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
+            }
 
-            client.newCall(request).execute().use { response ->
+            client.newCall(reqBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
                     return Result.failure(Exception("HTTP ${response.code} fetching clipboard image"))
                 }

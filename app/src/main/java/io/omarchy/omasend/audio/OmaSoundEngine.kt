@@ -13,7 +13,8 @@ class OmaSoundEngine(private val context: Context) {
 
     private var soundIdSend: Int = 0
     private var soundIdReceive: Int = 0
-    private var isLoaded: Boolean = false
+    private var soundIdReceiveChime: Int = 0
+    private val loadedSounds = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
     init {
         initSoundPool()
@@ -21,8 +22,8 @@ class OmaSoundEngine(private val context: Context) {
 
     private fun initSoundPool() {
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
 
         soundPool = SoundPool.Builder()
@@ -30,37 +31,49 @@ class OmaSoundEngine(private val context: Context) {
             .setAudioAttributes(audioAttributes)
             .build()
 
-        soundPool?.setOnLoadCompleteListener { _, _, status ->
-            if (status == 0) {
-                isLoaded = true
+        soundPool?.setOnLoadCompleteListener { _, sampleId, status ->
+            if (status == 0 && sampleId != 0) {
+                loadedSounds.add(sampleId)
             }
         }
 
         soundPool?.let { pool ->
             soundIdSend = pool.load(context, R.raw.send_whoosh, 1)
             soundIdReceive = pool.load(context, R.raw.receive_whoosh, 1)
+            soundIdReceiveChime = pool.load(context, R.raw.receive_chime, 1)
         }
     }
 
     /**
-     * Plays the forward whoosh sound when a file is dispatched from the Android device.
+     * Plays the samurai send vocal + katana sound (send_whoosh.wav: "OMAKASE!") when a file or clipboard is dispatched.
      */
     fun playSendSound() {
-        playSound(soundIdSend, volume = 0.9f)
+        playSound(soundIdSend, volume = 0.95f)
     }
 
     /**
-     * Plays the inverted whoosh sound (receive_whoosh.wav) when a file lands on the Android device.
+     * Plays the samurai receive/accept vocal + katana sound (receive_whoosh.wav: "ONEGAI SHIMASU!") when a file or transfer is accepted/received.
      */
     fun playReceiveSound() {
-        playSound(soundIdReceive, volume = 1.0f)
+        val targetId = if (loadedSounds.contains(soundIdReceive)) soundIdReceive else soundIdReceiveChime
+        playSound(targetId, volume = 1.0f)
+    }
+
+    private val prefs = context.getSharedPreferences("omasend_prefs", Context.MODE_PRIVATE)
+
+    fun isSoundEnabled(): Boolean {
+        return prefs.getBoolean("sound_effects_enabled", true)
+    }
+
+    fun setSoundEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("sound_effects_enabled", enabled).apply()
     }
 
     private fun playSound(soundId: Int, volume: Float) {
-        if (!isLoaded || soundId == 0) return
+        if (soundId == 0 || !isSoundEnabled()) return
 
         val ringerMode = audioManager?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
-        if (ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+        if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
             return
         }
 
@@ -80,7 +93,7 @@ class OmaSoundEngine(private val context: Context) {
         try {
             soundPool?.release()
             soundPool = null
-            isLoaded = false
+            loadedSounds.clear()
         } catch (_: Exception) {}
     }
 }

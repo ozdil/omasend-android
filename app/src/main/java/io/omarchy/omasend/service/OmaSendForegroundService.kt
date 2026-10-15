@@ -110,6 +110,12 @@ class OmaSendForegroundService : Service() {
         return START_STICKY
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        super.onTimeout(startId, fgsType)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {
@@ -129,21 +135,23 @@ class OmaSendForegroundService : Service() {
         const val ACTION_STOP = "io.omarchy.omasend.STOP_SERVICE"
 
         fun startService(context: Context) {
-            val intent = Intent(context, OmaSendForegroundService::class.java).apply {
-                action = ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            try {
+                val intent = Intent(context, OmaSendForegroundService::class.java).apply {
+                    action = ACTION_START
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (_: Exception) {}
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, OmaSendForegroundService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            try {
+                val intent = Intent(context, OmaSendForegroundService::class.java)
+                context.stopService(intent)
+            } catch (_: Exception) {}
         }
     }
 }

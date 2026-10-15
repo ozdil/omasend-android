@@ -38,7 +38,8 @@ class OmaSendServer(private val context: Context) {
     data class PendingState(
         val prompt: IncomingTransferPrompt,
         val expiresAt: Long,
-        var status: String // "PENDING", "ACCEPTED", "REJECTED"
+        var status: String, // "PENDING", "ACCEPTED", "REJECTED"
+        val remainingFiles: AtomicInteger = AtomicInteger(prompt.files.size.coerceAtLeast(1))
     )
 
     private val pendingTransfers = ConcurrentHashMap<String, PendingState>()
@@ -110,9 +111,8 @@ class OmaSendServer(private val context: Context) {
                     }
                     NetworkUtils.configureHighThroughputSocket(clientSocket)
 
-                    // Strict RFC 1918 / 3927 private network scope check BEFORE launching work
                     val remoteAddr = clientSocket.inetAddress
-                    if (remoteAddr == null || !NetworkUtils.isPrivateOrLocalAddress(remoteAddr)) {
+                    if (remoteAddr == null) {
                         try { clientSocket.close() } catch (_: Exception) {}
                         continue
                     }
@@ -164,6 +164,33 @@ class OmaSendServer(private val context: Context) {
     }
 
     var getDiscoveryMode: (() -> io.omarchy.omasend.model.DiscoveryMode)? = null
+
+    private fun getLocalOmaId(): String {
+        return try {
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+            app?.omaIdentity?.formattedId ?: io.omarchy.omasend.crypto.OmaIdentity.getOrGenerate(context).formattedId
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun isSameOwnerOmaId(candidate: String?): Boolean {
+        if (candidate.isNullOrBlank()) return false
+        val local = io.omarchy.omasend.crypto.OmaIdentity.unformat(getLocalOmaId())
+        val remote = io.omarchy.omasend.crypto.OmaIdentity.unformat(candidate)
+        if (local.length != 16 || remote.length != 16) return false
+        return java.security.MessageDigest.isEqual(
+            local.toByteArray(Charsets.UTF_8),
+            remote.toByteArray(Charsets.UTF_8)
+        )
+    }
+
+    private fun isPairedOrKnownOmaId(candidate: String?): Boolean {
+        if (candidate.isNullOrBlank()) return false
+        if (isSameOwnerOmaId(candidate)) return true
+        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+        return app?.discoveryManager?.isOmaIdPaired(candidate) == true
+    }
 
     private fun handleClient(socket: Socket, peerIp: String) {
         try {
@@ -243,9 +270,25 @@ class OmaSendServer(private val context: Context) {
 
             val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
 
-            // Early Visibility Check: reject connections if visibility is turned OFF
+            // Check network scope: allow private/local IPs or WAN connections carrying valid OmaID / active token
+            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
+            val headerOmaId = headers["x-omasend-omaid"] ?: getQueryParam(query, "oma_id").ifBlank { null }
+            val queryToken = getQueryParam(query, "token").ifBlank { null }
+            val hasValidActiveToken = queryToken != null && pendingTransfers.containsKey(queryToken)
+
+            if (!isPrivatePeer && !isPairedOrKnownOmaId(headerOmaId) && !hasValidActiveToken &&
+                method != "POST" // POST /api/p2p/request and /api/p2p/clipboard may carry oma_id inside JSON body
+            ) {
+                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN origin\"}")
+                return
+            }
+
+            // Early Visibility Check: reject connections if visibility is turned OFF (except same owner OmaID)
             val currentMode = getDiscoveryMode?.invoke()
-            if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF && path != "/api/status") {
+            if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF &&
+                path != "/api/status" &&
+                !isSameOwnerOmaId(headerOmaId)
+            ) {
                 sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Visibility is Off\"}")
                 return
             }
@@ -257,7 +300,7 @@ class OmaSendServer(private val context: Context) {
                     handlePing(output)
                 }
                 method == "POST" && path == "/api/p2p/request" -> {
-                    handleTransferRequest(input, output, contentLength, remainingDeadline)
+                    handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline)
                 }
                 method == "GET" && path == "/api/p2p/decision" -> {
                     handleDecisionQuery(output, query)
@@ -269,7 +312,7 @@ class OmaSendServer(private val context: Context) {
                     handleClipboard(input, output, headers, query, contentLength, peerIp, remainingDeadline)
                 }
                 method == "GET" && path == "/api/p2p/clipboard/image" -> {
-                    handleClipboardImageDownload(output, query)
+                    handleClipboardImageDownload(output, headers, query, peerIp)
                 }
                 else -> {
                     sendResponse(output, 404, "Not Found", "application/json", "{\"error\":\"Not found\"}")
@@ -285,12 +328,14 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handlePing(output: OutputStream) {
+        val myOmaId = getLocalOmaId()
         val resp = """
             {
                 "status": "OK",
                 "id": "${NetworkUtils.getDeviceId(context)}",
                 "name": "${NetworkUtils.getDeviceName(context)}",
-                "mode": "ALL"
+                "mode": "ALL",
+                "oma_id": "$myOmaId"
             }
         """.trimIndent()
         sendResponse(output, 200, "OK", "application/json", resp)
@@ -299,7 +344,9 @@ class OmaSendServer(private val context: Context) {
     private fun handleTransferRequest(
         input: InputStream,
         output: OutputStream,
+        headers: Map<String, String>,
         contentLength: Long,
+        peerIp: String,
         deadlineMs: Long
     ) {
         if (contentLength <= 0 || contentLength > MAX_CONTROL_BODY) {
@@ -336,18 +383,53 @@ class OmaSendServer(private val context: Context) {
             val req = json.decodeFromString<TransferRequest>(bodyJson)
             val token = UUID.randomUUID().toString().replace("-", "")
 
+            val headerOmaId = headers["x-omasend-omaid"]
+            val senderOmaId = when {
+                !headerOmaId.isNullOrBlank() -> headerOmaId
+                req.oma_id.isNotBlank() -> req.oma_id
+                io.omarchy.omasend.crypto.OmaIdentity.isValid(req.sender_id) -> req.sender_id
+                else -> ""
+            }
+
+            val isSameOwner = isSameOwnerOmaId(senderOmaId) || isSameOwnerOmaId(req.sender_id)
+            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
+
+            // Reject unauthenticated WAN transfer requests unless same owner or paired OmaID
+            if (!isPrivatePeer && !isSameOwner && !isPairedOrKnownOmaId(senderOmaId)) {
+                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"WAN transfer requires verified OmaID\"}")
+                return
+            }
+
+            if (!StorageUtils.hasEnoughStorageSpace(context, req.total_size_bytes)) {
+                sendResponse(output, 507, "Insufficient Storage", "application/json", "{\"error\":\"Insufficient storage space on device\"}")
+                return
+            }
+
             val prompt = IncomingTransferPrompt(
                 token = token,
                 senderId = req.sender_id,
                 senderName = req.sender_name,
-                senderIp = req.sender_ip,
+                senderIp = req.sender_ip.ifBlank { peerIp },
                 files = req.files,
                 totalSizeBytes = req.total_size_bytes
             )
 
+            // Anonymous Numbered OmaID Zero-Click Model: Auto-accept immediately if sender shares the same OmaID!
+            if (isSameOwner) {
+                addTrustedPeer(req.sender_id)
+                pendingTransfers[token] = PendingState(
+                    prompt = prompt,
+                    expiresAt = System.currentTimeMillis() + 60000L,
+                    status = "ACCEPTED"
+                )
+                val resp = """{"status":"ACCEPTED","token":"$token"}"""
+                sendResponse(output, 200, "OK", "application/json", resp)
+                return
+            }
+
             pendingTransfers[token] = PendingState(
                 prompt = prompt,
-                expiresAt = System.currentTimeMillis() + 30000,
+                expiresAt = System.currentTimeMillis() + 30000L,
                 status = "PENDING"
             )
 
@@ -389,7 +471,7 @@ class OmaSendServer(private val context: Context) {
             filenameRaw
         }
 
-        if (contentLength <= 0 || contentLength > StorageUtils.MAX_FILE_SIZE) {
+        if (contentLength < 0 || contentLength > StorageUtils.MAX_FILE_SIZE) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive file size\"}")
             return
         }
@@ -400,14 +482,15 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
+        // Extend token expiration while active upload is in progress for multi-file batches
+        val uploadDurationMs = 60000L + ((contentLength / (256 * 1024L)) * 1000L).coerceAtLeast(30000L)
+        val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
+        pendingTransfers[token] = state.copy(expiresAt = uploadDeadline + 30000L)
+
         // Configure socket timeout for active continuous streaming (30 seconds per I/O chunk)
         try {
             socket.soTimeout = 30000
         } catch (_: Exception) {}
-
-        // Dynamic deadline based on minimum transfer rate of 256 KiB/s plus 60 seconds buffer
-        val uploadDurationMs = 60000L + ((contentLength / (256 * 1024L)) * 1000L).coerceAtLeast(30000L)
-        val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
 
         val (saved, finalName) = NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
             StorageUtils.saveIncomingStream(
@@ -420,8 +503,15 @@ class OmaSendServer(private val context: Context) {
         }
 
         if (saved) {
-            pendingTransfers.remove(token)
+            if (state.remainingFiles.decrementAndGet() <= 0) {
+                pendingTransfers.remove(token)
+            }
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
             Handler(Looper.getMainLooper()).post {
+                try {
+                    app?.soundEngine?.playReceiveSound()
+                    app?.hapticController?.onFileReceivedImpact()
+                } catch (_: Exception) {}
                 onFileReceived?.invoke(finalName, contentLength)
             }
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
@@ -522,7 +612,16 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        // 3. Authenticate and Authorize
+        // 3. Authenticate and Authorize (including Anonymous Numbered OmaID Zero-Click check)
+        val headerOmaId = headers["x-omasend-omaid"]
+        val candidateOmaId = when {
+            !headerOmaId.isNullOrBlank() -> headerOmaId
+            payload.oma_id.isNotBlank() -> payload.oma_id
+            io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
+            else -> ""
+        }
+        val isSameOwner = isSameOwnerOmaId(candidateOmaId) || isSameOwnerOmaId(payload.sender_id)
+
         val providedPin = headers["x-omasend-pin"]
             ?: getQueryParam(query, "pin").ifBlank { null }
             ?: payload.pin
@@ -543,9 +642,9 @@ class OmaSendServer(private val context: Context) {
             System.currentTimeMillis() <= (pendingTransfers[providedKey]?.expiresAt ?: 0L)
 
         val isTrustedPeer = !payload.sender_id.isBlank() && isPeerTrusted(payload.sender_id)
-        val isLocalPeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
+        val isPairedPeer = isPairedOrKnownOmaId(candidateOmaId)
 
-        val isAuthorized = isPinValid || isKeyValid || isTokenValid || isTrustedPeer || isLocalPeer
+        val isAuthorized = isSameOwner || isPairedPeer || isPinValid || isKeyValid || isTokenValid || isTrustedPeer
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -563,7 +662,7 @@ class OmaSendServer(private val context: Context) {
                     401,
                     "Unauthorized",
                     "application/json",
-                    "{\"error\":\"Unauthorized clipboard write: valid PIN, session key, or paired token required\"}"
+                    "{\"error\":\"Unauthorized clipboard write: valid OmaID, PIN, session key, or paired token required\"}"
                 )
             }
             return
@@ -571,6 +670,9 @@ class OmaSendServer(private val context: Context) {
 
         // Authorized: reset failed attempts
         recordAuthAttempt(peerIp, true)
+        if (isSameOwner && payload.sender_id.isNotBlank()) {
+            addTrustedPeer(payload.sender_id)
+        }
 
         val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
         val vault = io.omarchy.omasend.repository.ClipboardVault.getInstance(context)
@@ -608,7 +710,13 @@ class OmaSendServer(private val context: Context) {
         sendResponse(output, 200, "OK", "application/json", "{\"status\":\"OK\"}")
     }
 
-    private fun handleClipboardImageDownload(output: OutputStream, query: String) {
+    private fun handleClipboardImageDownload(output: OutputStream, headers: Map<String, String>, query: String, peerIp: String) {
+        val headerOmaId = headers["x-omasend-omaid"]
+        if (!NetworkUtils.isPrivateOrLocalIp(peerIp) && !isPairedOrKnownOmaId(headerOmaId)) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN image request\"}")
+            return
+        }
+
         val hash = getQueryParam(query, "hash")
         if (hash.isBlank() || !hash.matches(Regex("^[a-fA-F0-9]{64}$"))) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid image hash\"}")

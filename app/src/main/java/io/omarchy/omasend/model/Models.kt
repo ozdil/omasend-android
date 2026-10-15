@@ -24,6 +24,7 @@ data class DiscoveredPeer(
     val omaId: String = "",
     val fingerprint: String = "",
     val isTrusted: Boolean = false,
+    val isSameOwner: Boolean = false,
     val lastSeen: Long = System.currentTimeMillis()
 )
 
@@ -35,11 +36,12 @@ data class TransferFileInfo(
 
 @Serializable
 data class TransferRequest(
-    val sender_id: String,
-    val sender_name: String,
-    val sender_ip: String,
-    val files: List<TransferFileInfo>,
-    val total_size_bytes: Long
+    val sender_id: String = "",
+    val sender_name: String = "Omarchy Device",
+    val sender_ip: String = "",
+    val files: List<TransferFileInfo> = emptyList(),
+    val total_size_bytes: Long = 0L,
+    val oma_id: String = ""
 )
 
 @Serializable
@@ -61,6 +63,7 @@ data class ClipboardPayload(
     val text: String = "",
     val pin: String? = null,
     val token: String? = null,
+    val oma_id: String = "",
     val content_type: String = "text",
     val image_hash: String? = null,
     val image_size: Long? = null,

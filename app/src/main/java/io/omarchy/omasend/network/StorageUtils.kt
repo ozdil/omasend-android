@@ -35,6 +35,32 @@ object StorageUtils {
     private val _incomingTransferMetrics = MutableStateFlow<TransferMetrics?>(null)
     val incomingTransferMetrics: StateFlow<TransferMetrics?> = _incomingTransferMetrics.asStateFlow()
 
+    private val _incomingFileName = MutableStateFlow<String?>(null)
+    val incomingFileName: StateFlow<String?> = _incomingFileName.asStateFlow()
+
+    @Volatile
+    private var cancelIncomingRequested: Boolean = false
+
+    fun cancelIncomingTransfer() {
+        cancelIncomingRequested = true
+    }
+
+    @android.annotation.SuppressLint("UsableSpace")
+    fun hasEnoughStorageSpace(context: Context, requiredBytes: Long): Boolean {
+        if (requiredBytes < 0 || requiredBytes > MAX_FILE_SIZE) return false
+        val reserveBytes = 64L * 1024 * 1024L
+        val downloadsDir = try {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        } catch (_: Exception) {
+            null
+        }
+        val usableSpace = when {
+            downloadsDir != null && downloadsDir.usableSpace > 0L -> downloadsDir.usableSpace
+            else -> context.filesDir.usableSpace
+        }
+        return usableSpace <= 0L || usableSpace >= (requiredBytes + reserveBytes)
+    }
+
     fun sanitizeFilename(raw: String): String {
         val trimmed = raw.replace("\u0000", "")
             .replace('/', '_')
@@ -84,19 +110,23 @@ object StorageUtils {
         deadlineMs: Long = Long.MAX_VALUE,
         onProgressWithMetrics: ((bytesRead: Long, total: Long, metrics: TransferMetrics) -> Unit)? = null
     ): Pair<Boolean, String> {
-        if (totalBytes <= 0 || totalBytes > MAX_FILE_SIZE) {
+        if (totalBytes < 0 || totalBytes > MAX_FILE_SIZE) {
             _incomingTransferMetrics.value = null
+            _incomingFileName.value = null
             return Pair(false, "Invalid or excessive file size ($totalBytes bytes)")
         }
 
-        val usableSpace = context.filesDir.usableSpace
-        if (usableSpace > 0 && usableSpace < (totalBytes + 64L * 1024 * 1024)) {
+        if (!hasEnoughStorageSpace(context, totalBytes)) {
             _incomingTransferMetrics.value = null
+            _incomingFileName.value = null
             return Pair(false, "Insufficient storage space on device")
         }
 
         val cleanName = sanitizeFilename(filename)
-        val speedCalculator = TransferSpeedCalculator(totalBytes)
+        val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
+        cancelIncomingRequested = false
+        _incomingFileName.value = cleanName
+        _incomingTransferMetrics.value = TransferMetrics(0L, totalBytes, 0, 0.0, 0L)
 
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -121,9 +151,11 @@ object StorageUtils {
                     contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                     resolver.update(uri, contentValues, null, null)
                     _incomingTransferMetrics.value = null
+                    _incomingFileName.value = null
                     Pair(true, cleanName)
                 } catch (e: Exception) {
                     _incomingTransferMetrics.value = null
+                    _incomingFileName.value = null
                     // Rollback dangling pending entry
                     try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                     throw e
@@ -135,6 +167,7 @@ object StorageUtils {
                 var target = File(dir, cleanName)
                 if (!target.canonicalPath.startsWith(dir.canonicalPath)) {
                     _incomingTransferMetrics.value = null
+                    _incomingFileName.value = null
                     return Pair(false, "Directory traversal detected")
                 }
 
@@ -147,6 +180,7 @@ object StorageUtils {
                         target = File(dir, "$name ($counter)$ext")
                         if (!target.canonicalPath.startsWith(dir.canonicalPath)) {
                             _incomingTransferMetrics.value = null
+                            _incomingFileName.value = null
                             return Pair(false, "Directory traversal detected")
                         }
                         counter++
@@ -158,15 +192,18 @@ object StorageUtils {
                         pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, onProgressWithMetrics)
                     }
                     _incomingTransferMetrics.value = null
+                    _incomingFileName.value = null
                     Pair(true, target.name)
                 } catch (e: Exception) {
                     _incomingTransferMetrics.value = null
+                    _incomingFileName.value = null
                     try { if (target.exists()) target.delete() } catch (_: Exception) {}
                     throw e
                 }
             }
         } catch (e: Exception) {
             _incomingTransferMetrics.value = null
+            _incomingFileName.value = null
             Pair(false, e.message ?: "Unknown storage error")
         }
     }
@@ -179,18 +216,31 @@ object StorageUtils {
         speedCalculator: TransferSpeedCalculator,
         onProgress: ((bytesRead: Long, total: Long, metrics: TransferMetrics) -> Unit)?
     ) {
+        if (totalBytes == 0L) {
+            output.flush()
+            val metrics = TransferMetrics(0L, 0L, 100, 0.0, 0L)
+            _incomingTransferMetrics.value = metrics
+            onProgress?.invoke(0L, 0L, metrics)
+            return
+        }
+
         val buffer = ByteArray(STREAM_CHUNK_SIZE)
         var totalRead = 0L
         var remaining = totalBytes
         var chunksSinceFlush = 0
 
         while (remaining > 0) {
+            if (cancelIncomingRequested) {
+                throw java.io.InterruptedIOException("Transfer cancelled by user")
+            }
             if (System.currentTimeMillis() > deadlineMs) {
                 throw java.io.InterruptedIOException("File upload exceeded monotonic deadline")
             }
             val toRead = if (remaining < buffer.size) remaining.toInt() else buffer.size
             val read = input.read(buffer, 0, toRead)
-            if (read == -1) break
+            if (read == -1) {
+                throw java.io.EOFException("Premature EOF during file upload ($totalRead / $totalBytes bytes)")
+            }
 
             output.write(buffer, 0, read)
             totalRead += read

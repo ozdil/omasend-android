@@ -258,11 +258,11 @@ class WanDiscoveryEngine(
 
             // Attribute padding to 4-byte boundary
             val padding = (4 - (attrLength % 4)) % 4
-            if (padding > 0 && offset + attrLength + padding <= length) {
+            offset += attrLength
+            if (padding > 0 && offset + padding <= length) {
                 buffer.position(buffer.position() + padding)
                 offset += padding
             }
-            offset += attrLength
         }
         return null
     }
@@ -317,14 +317,20 @@ class WanDiscoveryEngine(
      * Resolves a peer from a decrypted RendezvousPayload.
      */
     fun registerRendezvousPeer(payload: RendezvousPayload): DiscoveredPeer {
+        val myOmaId = try { identityProvider().formattedId } catch (_: Exception) { "" }
+        val isSameOwner = myOmaId.isNotBlank() && payload.omaId.isNotBlank() &&
+            OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(payload.omaId)
+
         val peer = DiscoveredPeer(
             id = "wan_${payload.deviceId}",
             name = payload.deviceName,
             ip = payload.wanIp,
             port = payload.wanPort,
             transport = "WAN",
+            omaId = payload.omaId,
             fingerprint = payload.omaId,
             isTrusted = true,
+            isSameOwner = isSameOwner,
             lastSeen = payload.timestamp
         )
         remotePeers[peer.id] = peer

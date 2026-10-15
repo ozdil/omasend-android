@@ -127,11 +127,19 @@ class DiscoveryManager(private val context: Context) {
         editor.apply()
 
         // Update all discovered peers matching this OmaID
+        val myOmaId = getMyOmaId()
+        val isSameOwner = myOmaId.isNotBlank() && OmaIdentity.unformat(myOmaId) == clean
         for ((id, peer) in peerMap) {
             if (OmaIdentity.unformat(peer.omaId) == clean || OmaIdentity.unformat(peer.fingerprint) == clean) {
                 val updatedName = if (!name.isNullOrBlank()) name.trim() else peer.name
                 val updatedIp = if (!ip.isNullOrBlank()) ip.trim() else peer.ip
-                peerMap[id] = peer.copy(isTrusted = true, omaId = formatted, name = updatedName, ip = updatedIp)
+                peerMap[id] = peer.copy(
+                    isTrusted = true,
+                    isSameOwner = isSameOwner,
+                    omaId = formatted,
+                    name = updatedName,
+                    ip = updatedIp
+                )
             }
         }
         updatePeersFlow()
@@ -157,7 +165,7 @@ class DiscoveryManager(private val context: Context) {
     fun setPeerTrusted(peerId: String, trusted: Boolean) {
         prefs.edit().putBoolean("trusted_$peerId", trusted).apply()
         peerMap[peerId]?.let { peer ->
-            peerMap[peerId] = peer.copy(isTrusted = trusted)
+            peerMap[peerId] = peer.copy(isTrusted = trusted || peer.isSameOwner)
         }
         updatePeersFlow()
     }
@@ -167,23 +175,96 @@ class DiscoveryManager(private val context: Context) {
         setPeerTrusted(peerId, !current)
     }
 
+    /**
+     * Resolves an existing discovered or paired peer by its 16-digit OmaID, or creates a target peer.
+     */
+    fun resolveOrCreatePeerForOmaId(
+        targetOmaId: String,
+        fallbackIp: String = "",
+        fallbackPort: Int = NetworkUtils.PORT
+    ): DiscoveredPeer? {
+        if (!OmaIdentity.isValid(targetOmaId)) return null
+        val formatted = OmaIdentity.format(targetOmaId)
+        val clean = OmaIdentity.unformat(targetOmaId)
+        val myOmaId = getMyOmaId()
+        val isSameOwner = myOmaId.isNotBlank() && OmaIdentity.unformat(myOmaId) == clean
+
+        // 1. Check active discovered peers in peerMap
+        val activeMatch = peerMap.values.firstOrNull {
+            it.ip.isNotBlank() && (OmaIdentity.unformat(it.omaId) == clean || OmaIdentity.unformat(it.fingerprint) == clean)
+        }
+        if (activeMatch != null) {
+            return activeMatch.copy(isSameOwner = isSameOwner, isTrusted = activeMatch.isTrusted || isSameOwner)
+        }
+
+        // 2. Check paired peers IP cache
+        val savedIp = pairedPrefs.getString("ip_$clean", null)?.ifBlank { null } ?: fallbackIp.trim()
+        val savedName = pairedPrefs.getString("name_$clean", null)?.ifBlank { null } ?: "OmaID ($formatted)"
+
+        addPairedOmaId(formatted, savedName, savedIp.ifBlank { null })
+
+        val peer = DiscoveredPeer(
+            id = "omaid_$clean",
+            name = savedName,
+            ip = savedIp,
+            port = fallbackPort,
+            transport = if (savedIp.isNotBlank() && !NetworkUtils.isPrivateOrLocalIp(savedIp)) "WAN" else "OMAID",
+            omaId = formatted,
+            fingerprint = formatted,
+            isTrusted = true,
+            isSameOwner = isSameOwner,
+            lastSeen = if (savedIp.isNotBlank()) System.currentTimeMillis() else 0L
+        )
+        if (savedIp.isNotBlank()) {
+            peerMap[peer.id] = peer
+            updatePeersFlow()
+        }
+        return peer
+    }
+
+    fun refreshSameOwnerFlags() {
+        val myOmaId = getMyOmaId()
+        val cleanMyOmaId = OmaIdentity.unformat(myOmaId)
+        for ((id, peer) in peerMap) {
+            val cleanPeerOma = OmaIdentity.unformat(peer.omaId.ifBlank { peer.fingerprint })
+            val sameOwner = cleanMyOmaId.isNotBlank() && cleanPeerOma == cleanMyOmaId
+            peerMap[id] = peer.copy(
+                isSameOwner = sameOwner,
+                isTrusted = sameOwner || isOmaIdPaired(peer.omaId) || isPeerTrusted(peer.id)
+            )
+        }
+        updatePeersFlow()
+    }
+
     private fun updatePeersFlow() {
         val mode = _discoveryMode.value
+        val myId = NetworkUtils.getDeviceId(context)
         val myOmaId = getMyOmaId()
         val cleanMyOmaId = OmaIdentity.unformat(myOmaId)
 
         val activeList = when (mode) {
             DiscoveryMode.OFF -> emptyList()
             DiscoveryMode.KNOWN_PEERS -> {
-                peerMap.values.filter { it.isTrusted || isOmaIdPaired(it.omaId) || it.id.startsWith("manual_") || it.transport == "DIRECT" }
+                peerMap.values.filter {
+                    val cleanPeerOma = OmaIdentity.unformat(it.omaId.ifBlank { it.fingerprint })
+                    val sameOwner = cleanMyOmaId.isNotBlank() && cleanPeerOma == cleanMyOmaId
+                    sameOwner || it.isSameOwner || it.isTrusted || isOmaIdPaired(it.omaId) || it.id.startsWith("manual_") || it.transport == "DIRECT"
+                }
             }
             DiscoveryMode.EVERYONE -> {
                 peerMap.values.toList()
             }
         }.filter { peer ->
-            // Filter out self device or self OmaID
-            val cleanPeerOma = OmaIdentity.unformat(peer.omaId)
-            !(cleanMyOmaId.isNotBlank() && cleanPeerOma == cleanMyOmaId)
+            // Only filter out self device_id; NEVER filter out other devices with the same OmaID!
+            peer.id != myId
+        }.map { peer ->
+            val cleanPeerOma = OmaIdentity.unformat(peer.omaId.ifBlank { peer.fingerprint })
+            val sameOwner = cleanMyOmaId.isNotBlank() && cleanPeerOma == cleanMyOmaId
+            if (sameOwner != peer.isSameOwner || (sameOwner && !peer.isTrusted)) {
+                peer.copy(isSameOwner = sameOwner, isTrusted = peer.isTrusted || sameOwner)
+            } else {
+                peer
+            }
         }.toMutableList()
 
         // Also add paired OmaIDs that are not currently in activeList as offline/paired devices
@@ -191,13 +272,14 @@ class DiscoveryManager(private val context: Context) {
             val pairedIds = getPairedOmaIds()
             for (pId in pairedIds) {
                 val cleanP = OmaIdentity.unformat(pId)
-                if (cleanP.isBlank() || cleanP == cleanMyOmaId) continue
-                val alreadyDiscovered = activeList.any { 
-                    OmaIdentity.unformat(it.omaId) == cleanP || OmaIdentity.unformat(it.fingerprint) == cleanP 
+                if (cleanP.isBlank()) continue
+                val alreadyDiscovered = activeList.any {
+                    OmaIdentity.unformat(it.omaId) == cleanP || OmaIdentity.unformat(it.fingerprint) == cleanP
                 }
                 if (!alreadyDiscovered) {
                     val savedName = pairedPrefs.getString("name_$cleanP", null) ?: "Eşleşmiş Cihaz"
                     val savedIp = pairedPrefs.getString("ip_$cleanP", null) ?: ""
+                    val sameOwner = cleanMyOmaId.isNotBlank() && cleanP == cleanMyOmaId
                     activeList.add(
                         DiscoveredPeer(
                             id = "paired_$cleanP",
@@ -208,6 +290,7 @@ class DiscoveryManager(private val context: Context) {
                             omaId = OmaIdentity.format(pId),
                             fingerprint = OmaIdentity.format(pId),
                             isTrusted = true,
+                            isSameOwner = sameOwner,
                             lastSeen = if (savedIp.isNotBlank()) 1L else 0L // Keep reachable if IP known
                         )
                     )
@@ -215,9 +298,12 @@ class DiscoveryManager(private val context: Context) {
             }
         }
 
-        _peers.value = activeList.sortedWith(compareByDescending<DiscoveredPeer> { it.isTrusted }
-            .thenByDescending { it.lastSeen > 0L }
-            .thenBy { it.name })
+        _peers.value = activeList.sortedWith(
+            compareByDescending<DiscoveredPeer> { it.isSameOwner }
+                .thenByDescending { it.isTrusted }
+                .thenByDescending { it.lastSeen > 0L }
+                .thenBy { it.name }
+        )
     }
 
     private fun sendBroadcastPacket(socket: DatagramSocket, payload: ByteArray, port: Int) {
@@ -495,17 +581,24 @@ class DiscoveryManager(private val context: Context) {
         updatePeersFlow()
     }
 
-    fun addManualPeer(ip: String, port: Int = NetworkUtils.PORT, name: String = "Direct ($ip)") {
-        if (!NetworkUtils.isPrivateOrLocalIp(ip)) return
+    fun addManualPeer(ip: String, port: Int = NetworkUtils.PORT, name: String = "Direct ($ip)", omaId: String = "") {
+        val cleanIp = ip.trim()
+        val hasValidOmaId = OmaIdentity.isValid(omaId)
+        if (!NetworkUtils.isPrivateOrLocalIp(cleanIp) && !hasValidOmaId) return
+        val formattedOma = if (hasValidOmaId) OmaIdentity.format(omaId) else ""
+        val myOmaId = getMyOmaId()
+        val isSameOwner = hasValidOmaId && myOmaId.isNotBlank() && OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(formattedOma)
+
         val peer = DiscoveredPeer(
-            id = "manual_${ip.replace('.', '_')}_$port",
+            id = "manual_${cleanIp.replace('.', '_')}_$port",
             name = name,
-            ip = ip,
+            ip = cleanIp,
             port = port,
-            transport = "DIRECT",
-            omaId = "",
-            fingerprint = "",
+            transport = if (!NetworkUtils.isPrivateOrLocalIp(cleanIp)) "WAN" else "DIRECT",
+            omaId = formattedOma,
+            fingerprint = formattedOma,
             isTrusted = true,
+            isSameOwner = isSameOwner,
             lastSeen = System.currentTimeMillis() + 3600000L // 1 hour persistent
         )
         peerMap[peer.id] = peer
@@ -513,7 +606,10 @@ class DiscoveryManager(private val context: Context) {
     }
 
     fun addRendezvousPeer(peer: DiscoveredPeer) {
-        peerMap[peer.id] = peer
+        val myOmaId = getMyOmaId()
+        val isSameOwner = myOmaId.isNotBlank() && peer.omaId.isNotBlank() &&
+            OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(peer.omaId)
+        peerMap[peer.id] = peer.copy(isSameOwner = isSameOwner, isTrusted = peer.isTrusted || isSameOwner)
         updatePeersFlow()
     }
 
@@ -557,10 +653,10 @@ class DiscoveryManager(private val context: Context) {
                                 val myIp = NetworkUtils.getLocalIpAddress()
                                 val myOmaId = getMyOmaId()
                                 val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
-                                
-                                val isSelfOmaId = myOmaId.isNotBlank() && peerOmaId.isNotBlank() && 
+
+                                val isSameOwner = myOmaId.isNotBlank() && peerOmaId.isNotBlank() &&
                                     OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
-                                val isSelfDevice = beacon.id == myId || beacon.ip == myIp || isSelfOmaId
+                                val isSelfDevice = beacon.id == myId || (beacon.ip == myIp && beacon.id == myId)
 
                                 if (!isSelfDevice) {
                                     // Remote peer notified OFFLINE
@@ -573,9 +669,9 @@ class DiscoveryManager(private val context: Context) {
                                     }
 
                                     val senderIp = packetAddr.hostAddress ?: beacon.ip
-                                    val isPaired = isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
+                                    val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
 
-                                    if (isOmaIdPaired(peerOmaId) && senderIp.isNotBlank()) {
+                                    if ((isSameOwner || isOmaIdPaired(peerOmaId)) && peerOmaId.isNotBlank() && senderIp.isNotBlank()) {
                                         val clean = OmaIdentity.unformat(peerOmaId)
                                         pairedPrefs.edit()
                                             .putString("ip_$clean", senderIp)
@@ -583,15 +679,17 @@ class DiscoveryManager(private val context: Context) {
                                             .apply()
                                     }
 
+                                    val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
                                     val peer = DiscoveredPeer(
                                         id = beacon.id,
                                         name = beacon.name,
                                         ip = senderIp,
                                         port = beacon.port,
                                         transport = "LAN",
-                                        omaId = peerOmaId,
-                                        fingerprint = peerOmaId,
-                                        isTrusted = isPaired,
+                                        omaId = formattedPeerOma,
+                                        fingerprint = formattedPeerOma,
+                                        isTrusted = isTrustedPeer,
+                                        isSameOwner = isSameOwner,
                                         lastSeen = System.currentTimeMillis()
                                     )
                                     peerMap[peer.id] = peer

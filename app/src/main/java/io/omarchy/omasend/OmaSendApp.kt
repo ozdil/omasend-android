@@ -78,16 +78,22 @@ class OmaSendApp : Application() {
 
     fun refreshOmaIdentity(): OmaIdentity {
         omaIdentity = OmaIdentity.getOrGenerate(this)
+        discoveryManager.refreshSameOwnerFlags()
+        discoveryManager.forceRefresh()
         return omaIdentity
     }
 
     fun setCustomOmaIdentity(newOmaId: String): OmaIdentity {
         omaIdentity = OmaIdentity.save(this, newOmaId)
+        discoveryManager.refreshSameOwnerFlags()
+        discoveryManager.forceRefresh()
         return omaIdentity
     }
 
     fun resetOmaIdentity(): OmaIdentity {
         omaIdentity = OmaIdentity.reset(this)
+        discoveryManager.refreshSameOwnerFlags()
+        discoveryManager.forceRefresh()
         return omaIdentity
     }
 

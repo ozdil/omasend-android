@@ -82,18 +82,23 @@ object TransferBridge {
     }
 
     /**
-     * Creates a synthetic DiscoveredPeer from a verified IP and Port for direct transfer.
+     * Creates a synthetic DiscoveredPeer from a verified IP and Port (and optional OmaID) for direct transfer.
      */
-    fun createManualPeer(ip: String, port: Int = 53317): DiscoveredPeer {
+    fun createManualPeer(ip: String, port: Int = 53317, omaId: String = "", isSameOwner: Boolean = false): DiscoveredPeer {
+        val cleanIp = ip.trim()
+        val formattedOma = if (io.omarchy.omasend.crypto.OmaIdentity.isValid(omaId)) {
+            io.omarchy.omasend.crypto.OmaIdentity.format(omaId)
+        } else ""
         return DiscoveredPeer(
-            id = "direct_${ip.replace('.', '_')}_$port",
-            name = "Direct ($ip)",
-            ip = ip,
+            id = "direct_${cleanIp.replace('.', '_')}_$port",
+            name = if (formattedOma.isNotBlank()) "OmaID ($formattedOma)" else "Direct ($cleanIp)",
+            ip = cleanIp,
             port = port,
-            transport = "DIRECT",
-            omaId = "",
-            fingerprint = "",
-            isTrusted = false,
+            transport = if (cleanIp.isNotBlank() && !NetworkUtils.isPrivateOrLocalIp(cleanIp)) "WAN" else "DIRECT",
+            omaId = formattedOma,
+            fingerprint = formattedOma,
+            isTrusted = isSameOwner || formattedOma.isNotBlank(),
+            isSameOwner = isSameOwner,
             lastSeen = System.currentTimeMillis() + 3600000L
         )
     }

@@ -58,8 +58,6 @@ class MainActivity : ComponentActivity() {
         }
 
         app.server.onFileReceived = { filename, size ->
-            app.soundEngine.playReceiveSound()
-            app.hapticController.onFileReceivedImpact()
             Toast.makeText(
                 this,
                 "Received '$filename' (${NetworkUtils.formatBytes(size)}) saved to Downloads/OmaSend",
@@ -77,6 +75,7 @@ class MainActivity : ComponentActivity() {
                     app = app,
                     incomingPrompt = incomingPrompt,
                     onAcceptPrompt = { token ->
+                        app.soundEngine.playReceiveSound()
                         app.server.acceptTransfer(token)
                         incomingPrompt = null
                         Toast.makeText(this, "Transfer accepted. Receiving...", Toast.LENGTH_SHORT).show()
@@ -118,8 +117,12 @@ class MainActivity : ComponentActivity() {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             clipboard?.removePrimaryClipChangedListener(it)
         }
-        val app = application as? OmaSendApp
-        app?.discoveryManager?.stop()
-        OmaSendForegroundService.stopService(this)
+        if (isFinishing && !isChangingConfigurations) {
+            val app = application as? OmaSendApp
+            if (app?.discoveryManager?.discoveryMode?.value == io.omarchy.omasend.model.DiscoveryMode.OFF) {
+                app.discoveryManager.stop()
+                OmaSendForegroundService.stopService(this)
+            }
+        }
     }
 }

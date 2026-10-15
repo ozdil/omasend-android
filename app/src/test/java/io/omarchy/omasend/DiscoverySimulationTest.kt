@@ -262,4 +262,68 @@ class DiscoverySimulationTest {
         val publicUri = io.omarchy.omasend.network.TransferBridge.parseConnectionEndpoint("http://1.1.1.1:53317")
         assertEquals(null, publicUri)
     }
+
+    @Test
+    fun testAnonymousNumberedOmaIdSameOwnerDiscoveryNeverFilteredOut() {
+        val sharedOwnerOmaId = "4829-1048-5729-1104"
+        val cleanMyOmaId = sharedOwnerOmaId.replace("-", "")
+        val myPhoneDeviceId = "phone-uuid-101"
+        val myPcDeviceId = "pc-uuid-202"
+
+        val pcBeacon = P2pBeaconPacket(
+            magic = "OMASEND_P2P",
+            v = 1,
+            id = myPcDeviceId,
+            name = "Ozan Omarchy Desktop",
+            ip = "192.168.1.100",
+            port = 53317,
+            mode = "ALL",
+            oma_id = sharedOwnerOmaId,
+            fp = sharedOwnerOmaId
+        )
+
+        // Ensure same OmaID with different device ID is NOT treated as self loopback
+        val isSelfDevice = pcBeacon.id == myPhoneDeviceId
+        assertFalse("Another device belonging to the same user (same OmaID, different device ID) must NEVER be filtered out", isSelfDevice)
+
+        val cleanBeaconOmaId = pcBeacon.oma_id.replace("-", "").trim()
+        val isSameOwner = cleanMyOmaId.isNotEmpty() && cleanBeaconOmaId == cleanMyOmaId
+        assertTrue("Device with matching OmaID must be marked as isSameOwner = true", isSameOwner)
+
+        val discoveredPc = DiscoveredPeer(
+            id = pcBeacon.id,
+            name = pcBeacon.name,
+            ip = pcBeacon.ip,
+            port = pcBeacon.port,
+            transport = "LAN",
+            omaId = sharedOwnerOmaId,
+            fingerprint = pcBeacon.fp,
+            isTrusted = isSameOwner,
+            isSameOwner = isSameOwner,
+            lastSeen = System.currentTimeMillis()
+        )
+
+        assertTrue(discoveredPc.isSameOwner)
+        assertTrue(discoveredPc.isTrusted)
+    }
+
+    @Test
+    fun testZeroClickAutoAcceptTransferRequestSerialization() {
+        val ownerOmaId = "4829-1048-5729-1104"
+        val req = TransferRequest(
+            sender_id = ownerOmaId,
+            oma_id = ownerOmaId,
+            sender_name = "Omarchy Phone",
+            sender_ip = "192.168.1.55",
+            files = listOf(TransferFileInfo("notes.txt", 1024L)),
+            total_size_bytes = 1024L
+        )
+
+        val encoded = json.encodeToString(TransferRequest.serializer(), req)
+        val decoded = json.decodeFromString<TransferRequest>(encoded)
+
+        assertEquals(ownerOmaId, decoded.oma_id)
+        assertEquals(ownerOmaId, decoded.sender_id)
+    }
 }
+
