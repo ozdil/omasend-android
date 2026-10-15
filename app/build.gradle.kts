@@ -17,6 +17,7 @@ android {
         targetSdk = 36
         versionCode = 57
         versionName = "1.8.6"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val keystorePropsFile: File? = listOf(
