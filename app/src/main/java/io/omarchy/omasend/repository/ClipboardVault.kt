@@ -392,12 +392,16 @@ class ClipboardVault private constructor(private val context: Context) {
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 
             val peers = app.discoveryManager.peers.value
-            if (peers.isNotEmpty()) {
+            val authorizedPeers = peers.filter { peer ->
+                peer.isSameOwner || peer.isTrusted ||
+                    (peer.omaId.isNotBlank() && app.discoveryManager.isOmaIdPaired(peer.omaId))
+            }
+            if (authorizedPeers.isNotEmpty()) {
                 scope.launch {
-                    for (peer in peers) {
+                    for (peer in authorizedPeers) {
                         if (peer.transport == "BT" || peer.ip.startsWith("bt:") || peer.port <= 0) continue
                         try {
-                            app.client.sendClipboard(peer.ip, peer.port, text)
+                            app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
                         } catch (_: Exception) {}
                     }
                 }
@@ -447,6 +451,7 @@ class ClipboardVault private constructor(private val context: Context) {
         const val MAX_VAULT_ITEMS = 20
         const val HASH_RING_CAPACITY = 64
 
+        @android.annotation.SuppressLint("StaticFieldLeak")
         @Volatile
         private var INSTANCE: ClipboardVault? = null
 
