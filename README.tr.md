@@ -22,7 +22,7 @@
 Android için OmaSend, Omarchy Linux masaüstü arka plan motoru ve Web PWA istemcisiyle tam uyum içinde geliştirilmiştir:
 
 - **Anonim Numaralı Kimlik (Sıfır Kayıt OmaID) & Zero-Click Kendi Cihazlarım:** Kayıt, e-posta veya kullanıcı adı gerektirmeyen ücretsiz ve açık kaynaklı 16 haneli Luhn mod-10 numaralı kimlik (`XXXX-XXXX-XXXX-XXXX`). Bilgisayarınıza ve telefonunuza aynı OmaID'yi girerek RFC 2104 HMAC-SHA256 Kör Randevu konuları, RFC 5869 HKDF-SHA256 anahtar türetimi ve sabit zamanlı (`MessageDigest.isEqual`) doğrulama ile sıfır izinli (Zero-Click) güven ağı kurun.
-- **AMOLED Zen Radar & Samuray Ses Efektleri:** Temiz durum rozetleri (`[E2EE SECURE]`, `[ZERO-CLICK]`, `[OMAID P2P]`), dokunsal titreşim geri bildirimi ve dosya gönderme (*"OMAKASE!"*) / alma (*"ONEGAI SHIMASU!"*) anlarında otantik samuray ses efektleri.
+- **AMOLED Zen Radar & Samuray Ses Efektleri:** Temiz durum rozetleri (`[OMAID P2P]`, aynı OmaID cihaz gruplaması), dokunsal titreşim geri bildirimi ve dosya gönderme (*"OMAKASE!"*) / alma (*"ONEGAI SHIMASU!"*) anlarında otantik samuray ses efektleri.
 - **Evrensel Çok Formatlı Pano Kasası:** Metin ve görseller için gerçek zamanlı çift yönlü pano senkronizasyonu ve otomatik WebP mikro önizleme önbelleği.
 - **Hassas Pano Kalkanı:** Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE` ve parola yöneticisi etiketlerini otomatik olarak tanır; hassas şifrelerin istem dışı aktarılmasını engeller.
 - **Sıfır Kopyalı ByteBuffers (`ASharedMemory` Mimarisi):** NDK katmanında optimize edilmiş bellek yönetimi ile çok gigabaytlık aktarımlarda Garbage Collection duraksamalarını tamamen ortadan kaldırır.
@@ -56,7 +56,7 @@ Android için OmaSend, doğrulanmış SHA-256 uygulama imzası ve **Play Protect
 - **Sıfır Bulut ve Mutlak Gizlilik:** Yalnızca yerel Wi-Fi ve Kör Randevu kanalları üzerinden çalışır. Sıfır telemetri, sıfır harici bulut sunucusu ve sıfır kullanıcı takibi.
 - **Anında UDP Keşfi:** Manuel IP adresi yazmaya gerek kalmadan `53317` portu üzerinden otomatik cihaz tespiti.
 - **Modern Jetpack Compose Arayüzü:** Material 3, Koyu Akrilik cam teması ve akıcı reaktif durum yönetimi.
-- **Uçtan Uca Kriptografik Güvenlik:** Sıfır Güven (Zero-Trust) geçici belirteçler, PIN doğrulaması ve AES-256-GCM / BLAKE3 bütünlük denetimi.
+- **Güvenlik durumu:** Gelen her transfer onay ister, pano senkronu yalnızca eşleştirilmiş cihazlarla çalışır. Yerel ağ trafiği henüz uçtan uca şifreli veya kriptografik olarak kimliği doğrulanmış değildir; güvendiğiniz ağlarda kullanın. Cihaz başına anahtarlar ve kimliği doğrulanmış şifreleme yol haritasındadır.
 
 ---
 

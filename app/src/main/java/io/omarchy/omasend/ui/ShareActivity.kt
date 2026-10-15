@@ -163,7 +163,7 @@ class ShareActivity : ComponentActivity() {
                                 if (myDevices.isNotEmpty()) {
                                     item {
                                         SectionHeaderRow(
-                                            title = "KENDİ CİHAZLARIM (AYNI OMAID • ZERO-CLICK)",
+                                            title = "KENDİ CİHAZLARIM (AYNI OMAID)",
                                             count = myDevices.size,
                                             accentColor = Color(0xFF10B981)
                                         )

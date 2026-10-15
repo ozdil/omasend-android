@@ -901,7 +901,7 @@ fun AnonymousNumberedIdentityCard(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Aynı OmaID'ye sahip tüm cihazlarınız Zero-Click (onaysız) dosya alır",
+                            text = "Aynı OmaID'ye sahip cihazlarınız burada gruplanır; her transfer onay ister",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
@@ -1029,7 +1029,7 @@ fun SameOwnerEmptyHintCard(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Bilgisayarınızdaki 16 haneli OmaID'yi telefonunuzda 'OmaID Değiştir / Eşitle' düğmesiyle girdiğinizde kendi cihazlarınız burada listelenir ve onay sormadan (Zero-Click) anında dosya aktarır.",
+                text = "Bilgisayarınızdaki 16 haneli OmaID'yi telefonunuzda 'OmaID Değiştir / Eşitle' düğmesiyle girdiğinizde kendi cihazlarınız burada listelenir. Güvenlik nedeniyle her transfer onay ister.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1254,7 +1254,7 @@ fun ModernPeerCard(
                             border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f))
                         ) {
                             Text(
-                                text = "ZERO-CLICK",
+                                text = "AYNI OMAID",
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontFamily = JetBrainsMonoFontFamily,
@@ -2296,7 +2296,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Omarchy Linux & Android Hibrit Güvenli Transfer Sistemi. Kayıtsız (Zero-Log) 16 haneli anonim numaralı OmaID kimliğiyle kendi cihazlarınız arasında Zero-Click (onaysız), farklı OmaID'ler arasında ise onaylı P2P AirBridge aktarımı sunar.",
+                    text = "Omarchy Linux & Android Hibrit Güvenli Transfer Sistemi. Kayıtsız (Zero-Log) 16 haneli anonim numaralı OmaID kimliğiyle cihazlarınız arasında onaylı P2P AirBridge aktarımı sunar.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2312,7 +2312,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         InfoDialogRow("Ağ Protokolü", "P2P AirBridge (53317)")
-                        InfoDialogRow("Kendi Cihazlarım", "Aynı OmaID • Zero-Click")
+                        InfoDialogRow("Kendi Cihazlarım", "Aynı OmaID • Onaylı")
                         InfoDialogRow("Kimlik Modeli", "Anonim Numaralı OmaID (Sıfır Kayıt)")
                         InfoDialogRow("Geliştirici", "Ozan Özdil (@ozdil)")
                         InfoDialogRow("Lisans", "MIT • Ücretsiz & Açık Kaynak")
@@ -3097,7 +3097,7 @@ fun EditOmaIdDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "ANONİM NUMARALI KİMLİK • KENDİ CİHAZLARIM ARASI ZERO-CLICK",
+                        text = "ANONİM NUMARALI KİMLİK • KENDİ CİHAZLARIM",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         fontFamily = JetBrainsMonoFontFamily,
                         color = MaterialTheme.colorScheme.primary,
@@ -3108,7 +3108,7 @@ fun EditOmaIdDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Bilgisayarınızdaki 16 haneli OmaID'yi buraya girdiğinizde telefonunuz ve bilgisayarınız aynı kullanıcı kimliğini paylaşır. Aynı OmaID'ye sahip cihazlar birbirini otomatik görür ve onay sormadan (Zero-Click) dosya alıp gönderir.",
+                    text = "Bilgisayarınızdaki 16 haneli OmaID'yi buraya girdiğinizde telefonunuz ve bilgisayarınız aynı kullanıcı kimliğini paylaşır. Aynı OmaID'ye sahip cihazlar 'Kendi Cihazlarım' altında gruplanır; güvenlik nedeniyle her transfer onay ister.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

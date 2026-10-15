@@ -22,7 +22,7 @@
 OmaSend for Android is engineered in lockstep with the Omarchy Linux desktop daemon and Web PWA client:
 
 - **Anonymous Numbered Identity (Zero-Log OmaID) & Zero-Click My Devices:** Free and open-source 16-digit Luhn mod-10 numbered account identity (`XXXX-XXXX-XXXX-XXXX`). Enter the same OmaID on your PC and phone to form an instant Zero-Click trust mesh using RFC 2104 HMAC-SHA256 Blinded Rendezvous topics, RFC 5869 HKDF-SHA256 key derivation, and constant-time (`MessageDigest.isEqual`) verification.
-- **AMOLED Zen Radar & Samurai Audio Feedback:** Clean status indicators (`[E2EE SECURE]`, `[ZERO-CLICK]`, `[OMAID P2P]`), responsive tactile feedback, and authentic samurai sound effects on send (*"OMAKASE!"*) and receive/accept (*"ONEGAI SHIMASU!"*).
+- **AMOLED Zen Radar & Samurai Audio Feedback:** Clean status indicators (`[OMAID P2P]`, same-OmaID device grouping), responsive tactile feedback, and authentic samurai sound effects on send (*"OMAKASE!"*) and receive/accept (*"ONEGAI SHIMASU!"*).
 - **Universal Multi-Format Clipboard Vault:** Real-time bi-directional clipboard sync supporting text and images with automatic WebP micro-thumbnail caching.
 - **Sensitive Clipboard Shield:** Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE` and password manager tags are automatically detected to protect credentials.
 - **Zero-Copy ByteBuffers (`ASharedMemory` Architecture):** Memory allocations are optimized at the NDK layer, eliminating Garbage Collection pauses during multi-gigabyte streams.
@@ -56,7 +56,7 @@ OmaSend for Android is distributed officially via **Google Play** with verified 
 - **Zero Cloud & Absolute Privacy:** Operates strictly over local Wi-Fi and Blinded Rendezvous channels. Zero telemetry, zero external cloud servers, and zero tracking.
 - **Instant UDP Discovery:** Automatic device discovery on port `53317` without tedious manual IP typing.
 - **Modern Jetpack Compose UI:** Built with Material 3, Dark Acrylic palette, and fluid reactive state management.
-- **End-to-End Cryptographic Security:** Zero-Trust ephemeral tokens, PIN authentication, and AES-256-GCM / BLAKE3 integrity verification.
+- **Security status:** Every incoming transfer requires approval and clipboard sync is limited to paired devices. LAN traffic is not yet end-to-end encrypted or cryptographically authenticated; use it on trusted networks. Per-device keys and authenticated encryption are on the roadmap.
 
 ---
 
