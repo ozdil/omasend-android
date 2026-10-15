@@ -13,8 +13,6 @@ class OmaSoundEngine(private val context: Context) {
 
     private var soundIdSend: Int = 0
     private var soundIdReceive: Int = 0
-    private var soundIdReceiveChime: Int = 0
-    private val loadedSounds = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
     init {
         initSoundPool()
@@ -22,41 +20,27 @@ class OmaSoundEngine(private val context: Context) {
 
     private fun initSoundPool() {
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
         soundPool = SoundPool.Builder()
-            .setMaxStreams(4)
+            .setMaxStreams(3)
             .setAudioAttributes(audioAttributes)
             .build()
-
-        soundPool?.setOnLoadCompleteListener { _, sampleId, status ->
-            if (status == 0 && sampleId != 0) {
-                loadedSounds.add(sampleId)
-            }
-        }
 
         soundPool?.let { pool ->
             soundIdSend = pool.load(context, R.raw.send_whoosh, 1)
             soundIdReceive = pool.load(context, R.raw.receive_whoosh, 1)
-            soundIdReceiveChime = pool.load(context, R.raw.receive_chime, 1)
         }
     }
 
-    /**
-     * Plays the samurai send vocal + katana sound (send_whoosh.wav: "OMAKASE!") when a file or clipboard is dispatched.
-     */
     fun playSendSound() {
-        playSound(soundIdSend, volume = 0.95f)
+        playSound(soundIdSend, volume = 0.85f)
     }
 
-    /**
-     * Plays the samurai receive/accept vocal + katana sound (receive_whoosh.wav: "ONEGAI SHIMASU!") when a file or transfer is accepted/received.
-     */
     fun playReceiveSound() {
-        val targetId = if (loadedSounds.contains(soundIdReceive)) soundIdReceive else soundIdReceiveChime
-        playSound(targetId, volume = 1.0f)
+        playSound(soundIdReceive, volume = 0.85f)
     }
 
     private val prefs = context.getSharedPreferences("omasend_prefs", Context.MODE_PRIVATE)
@@ -93,7 +77,6 @@ class OmaSoundEngine(private val context: Context) {
         try {
             soundPool?.release()
             soundPool = null
-            loadedSounds.clear()
         } catch (_: Exception) {}
     }
 }
