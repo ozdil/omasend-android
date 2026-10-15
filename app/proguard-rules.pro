@@ -47,3 +47,9 @@
 # Compose & Lifecycle
 -dontwarn androidx.compose.**
 -dontwarn androidx.lifecycle.**
+
+# UniFFI / JNA bindings for libomasend_core.so (accessed via reflection and native callbacks)
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keep class uniffi.omasend_core.** { *; }
+-dontwarn java.awt.**

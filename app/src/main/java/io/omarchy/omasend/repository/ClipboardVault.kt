@@ -126,6 +126,12 @@ class ClipboardVault private constructor(private val context: Context) {
         return file
     }
 
+    /** Records clipboard text received over the core transport (prevents echoing it back). */
+    fun recordRemoteText(text: String, senderName: String) {
+        recordHash(computeHash(text))
+        addEntry(text = text, senderName = senderName, isMine = false, contentType = "text")
+    }
+
     fun computeHash(text: String): String {
         return NetworkUtils.computeSha256(text)
     }
@@ -412,7 +418,10 @@ class ClipboardVault private constructor(private val context: Context) {
                     }
                     for (k in keyTargets) {
                         try {
-                            app.client.sendClipboard(k.ip, if (k.port > 0) k.port else NetworkUtils.PORT, text, "")
+                            // Encrypted QUIC first; legacy signed HTTP if the peer has no core endpoint.
+                            if (!io.omarchy.omasend.network.CoreNode.sendClipboard(context, k, text)) {
+                                app.client.sendClipboard(k.ip, if (k.port > 0) k.port else NetworkUtils.PORT, text, "")
+                            }
                         } catch (_: Exception) {}
                     }
                 }

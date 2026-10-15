@@ -2461,6 +2461,8 @@ suspend fun sendMultipleUrisToPeer(
     onState: (TransferProgressState) -> Unit
 ) {
     if (uris.isEmpty()) return
+    // Phase 2: QR-paired devices get the encrypted, resumable QUIC transport.
+    if (io.omarchy.omasend.network.CoreNode.trySendUris(context, app, peer, uris, onState)) return
     if (uris.size == 1) {
         sendFileUriToPeer(context, app, peer, uris.first(), onState)
         return

@@ -93,6 +93,13 @@ object DeviceKey {
     }
 
     @Volatile private var cachedIdentity: Identity? = null
+    @Volatile private var cachedSeed: ByteArray? = null
+
+    /** Raw 32-byte device seed (for the transport core, whose endpoint key is this same key). */
+    fun seed(context: Context): ByteArray {
+        identity(context)
+        return cachedSeed!!.copyOf()
+    }
 
     /** Seed is stored in app-private storage, wrapped with a non-exportable Android Keystore AES key. */
     fun identity(context: Context): Identity {
@@ -100,9 +107,15 @@ object DeviceKey {
         synchronized(this) {
             cachedIdentity?.let { return it }
             val file = File(context.filesDir, "device_ed25519.key.enc")
-            val seed = (if (file.exists()) unwrap(file.readBytes()) else null) ?: randomBytes(32).also { s ->
-                wrap(s)?.let { file.writeBytes(it) }
-            }
+            // Fallback for devices whose Keystore is unusable: app-private plain seed file.
+            val plain = File(context.filesDir, "device_ed25519.key")
+            val seed = (if (file.exists()) unwrap(file.readBytes()) else null)
+                ?: (if (plain.exists()) plain.readBytes().takeIf { it.size == 32 } else null)
+                ?: randomBytes(32).also { s ->
+                    val wrapped = wrap(s)
+                    if (wrapped != null) file.writeBytes(wrapped) else plain.writeBytes(s)
+                }
+            cachedSeed = seed.copyOf()
             return Identity(seed).also { cachedIdentity = it }
         }
     }
@@ -152,6 +165,8 @@ object DeviceKey {
         val name: String,
         val ip: String = "",
         val port: Int = 0,
+        /** UDP port of the peer's omasend-core (QUIC) endpoint; 0 = default 53318. */
+        val quic_port: Int = 0,
         val own_device: Boolean = false,
         val added_at: Long,
         val last_seen: Long = 0
@@ -206,7 +221,8 @@ object DeviceKey {
         val host: String,
         val port: Int,
         val name: String,
-        val ownDevice: Boolean
+        val ownDevice: Boolean,
+        val quicPort: Int = 0
     )
 
     fun isPairUri(text: String) = text.trim().startsWith("omasend://pair?")
@@ -225,11 +241,12 @@ object DeviceKey {
             host = URLDecoder.decode(map["h"] ?: error("Missing host"), "UTF-8"),
             port = map["p"]?.toIntOrNull() ?: error("Invalid port"),
             name = URLDecoder.decode(map["n"] ?: "", "UTF-8"),
-            ownDevice = map["o"] == "1"
+            ownDevice = map["o"] == "1",
+            quicPort = map["q"]?.toIntOrNull() ?: 0
         )
     }
 
-    fun buildPairRequest(id: Identity, offer: ParsedOffer, myName: String): JsonObject {
+    fun buildPairRequest(id: Identity, offer: ParsedOffer, myName: String, myQuicPort: Int = 0): JsonObject {
         val mac = pairMac(offer.secret, offer.pk, id.publicB64)
         val sig = id.signB64(pairTranscript(offer.pk, id.publicB64, mac).toByteArray())
         return buildJsonObject {
@@ -237,6 +254,7 @@ object DeviceKey {
             put("name", myName)
             put("mac", mac)
             put("sig", sig)
+            put("quic_port", myQuicPort)
         }
     }
 
@@ -253,7 +271,7 @@ object DeviceKey {
     private class Offer(val secret: ByteArray, val ownDevice: Boolean, val expiresAt: Long, var failures: Int = 0)
     private val offers = mutableListOf<Offer>()
 
-    fun createPairOffer(id: Identity, name: String, host: String, port: Int, ownDevice: Boolean): String {
+    fun createPairOffer(id: Identity, name: String, host: String, port: Int, ownDevice: Boolean, quicPort: Int = 0): String {
         val secret = randomBytes(32)
         synchronized(offers) {
             val now = nowSecs()
@@ -261,10 +279,10 @@ object DeviceKey {
             offers.add(Offer(secret, ownDevice, now + PAIR_OFFER_TTL_SECS))
         }
         fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
-        return "omasend://pair?v=2&pk=${id.publicB64}&s=${b64(secret)}&h=${enc(host)}&p=$port&n=${enc(name)}&o=${if (ownDevice) 1 else 0}"
+        return "omasend://pair?v=2&pk=${id.publicB64}&s=${b64(secret)}&h=${enc(host)}&p=$port&n=${enc(name)}&o=${if (ownDevice) 1 else 0}&q=$quicPort"
     }
 
-    fun acceptPairRequest(id: Identity, myName: String, body: JsonObject, peerIp: String): Result<Pair<JsonObject, TrustedKey>> = runCatching {
+    fun acceptPairRequest(id: Identity, myName: String, body: JsonObject, peerIp: String, myQuicPort: Int = 0): Result<Pair<JsonObject, TrustedKey>> = runCatching {
         val iPk = body["pk"]?.jsonPrimitive?.content ?: error("Missing pk")
         val iName = (body["name"]?.jsonPrimitive?.content ?: "Unknown device").take(64)
         val mac = body["mac"]?.jsonPrimitive?.content ?: error("Missing mac")
@@ -286,11 +304,13 @@ object DeviceKey {
             match
         }
         val now = nowSecs()
-        val key = TrustedKey(iPk, deviceIdForPk(vk), iName, peerIp, 0, offer.ownDevice, now, now)
+        val quic = body["quic_port"]?.jsonPrimitive?.content?.toIntOrNull()?.takeIf { it in 1..65535 } ?: 0
+        val key = TrustedKey(iPk, deviceIdForPk(vk), iName, peerIp, 0, quic, offer.ownDevice, now, now)
         val resp = buildJsonObject {
             put("pk", id.publicB64)
             put("name", myName)
             put("device_id", id.deviceId)
+            put("quic_port", myQuicPort)
             put("sig", id.signB64(pairTranscript(id.publicB64, iPk, mac).toByteArray()))
         }
         resp to key

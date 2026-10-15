@@ -113,12 +113,20 @@ class OmaSendServer(private val context: Context) {
     }
 
     fun acceptTransfer(token: String) {
+        if (CoreNode.isQuicOffer(token)) {
+            CoreNode.respond(token, true)
+            return
+        }
         val state = pendingTransfers[token] ?: return
         state.status = "ACCEPTED"
         addTrustedPeer(state.prompt.senderId)
     }
 
     fun rejectTransfer(token: String) {
+        if (CoreNode.isQuicOffer(token)) {
+            CoreNode.respond(token, false)
+            return
+        }
         pendingTransfers[token]?.status = "REJECTED"
     }
 
@@ -576,7 +584,7 @@ class OmaSendServer(private val context: Context) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
             return
         }
-        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp)
+        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT)
             .onSuccess { (resp, key) ->
                 trustStore.upsert(key)
                 Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }

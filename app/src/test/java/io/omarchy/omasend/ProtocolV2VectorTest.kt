@@ -36,16 +36,18 @@ class ProtocolV2VectorTest {
     fun pairingRoundTripAndSignedRequest() {
         val phone = DeviceKey.Identity(DeviceKey.randomBytes(32))
         val tablet = DeviceKey.Identity(DeviceKey.randomBytes(32))
-        val uri = DeviceKey.createPairOffer(tablet, "Tablet & Co", "192.168.1.30", 53317, ownDevice = true)
+        val uri = DeviceKey.createPairOffer(tablet, "Tablet & Co", "192.168.1.30", 53317, ownDevice = true, quicPort = 53318)
         val offer = DeviceKey.parsePairUri(uri).getOrThrow()
         assertEquals("Tablet & Co", offer.name)
         assertTrue(offer.ownDevice)
 
-        val req = DeviceKey.buildPairRequest(phone, offer, "Phone")
+        val req = DeviceKey.buildPairRequest(phone, offer, "Phone", 40000)
         val (resp, key) = DeviceKey.acceptPairRequest(tablet, "Tablet", req, "192.168.1.20").getOrThrow()
         DeviceKey.verifyPairResponse(phone, offer, resp).getOrThrow()
         assertEquals(phone.publicB64, key.pk)
         assertTrue(key.own_device)
+        assertEquals(53318, offer.quicPort)
+        assertEquals(40000, key.quic_port)
         // single use
         assertTrue(DeviceKey.acceptPairRequest(tablet, "Tablet", req, "192.168.1.20").isFailure)
 

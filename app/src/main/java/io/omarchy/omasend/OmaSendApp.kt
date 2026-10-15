@@ -72,6 +72,8 @@ class OmaSendApp : Application() {
         }
 
         server.start()
+        // Phase 2: encrypted QUIC transport for QR-paired devices (falls back to HTTP if unavailable).
+        io.omarchy.omasend.network.CoreNode.start(this)
         discoveryManager.start()
         wanDiscoveryEngine.start()
     }

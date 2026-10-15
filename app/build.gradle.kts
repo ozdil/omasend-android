@@ -99,6 +99,8 @@ dependencies {
   implementation(libs.zxing.core)
   // Ed25519 for protocol v2 device keys (platform JCA has no Ed25519 below API 33)
   implementation(libs.bouncycastle.bcprov)
+  // UniFFI bindings for the shared Rust transport core (libomasend_core.so)
+  implementation("${libs.jna.get()}@aar")
 
   // CameraX for Zero-GMS QR/Barcode Scanning
   implementation(libs.androidx.camera.core)

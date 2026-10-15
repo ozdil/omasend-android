@@ -118,7 +118,8 @@ class OmaSendClient(private val context: Context) {
         val offer = DeviceKey.parsePairUri(uri).getOrThrow()
         require(NetworkUtils.isPrivateOrLocalIp(offer.host)) { "Pairing is only allowed on the local network" }
         val id = DeviceKey.identity(context)
-        val body = DeviceKey.buildPairRequest(id, offer, NetworkUtils.getDeviceName(context)).toString()
+        val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+        val body = DeviceKey.buildPairRequest(id, offer, NetworkUtils.getDeviceName(context), myQuic).toString()
         val request = Request.Builder()
             .url("http://${offer.host}:${offer.port}/api/v2/pair")
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -138,6 +139,8 @@ class OmaSendClient(private val context: Context) {
                 name = name,
                 ip = offer.host,
                 port = offer.port,
+                quic_port = (obj["quic_port"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+                    ?.takeIf { it in 1..65535 } ?: offer.quicPort,
                 own_device = offer.ownDevice,
                 added_at = now,
                 last_seen = now
