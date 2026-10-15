@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/S%C3%BCr%C3%BCm-v1.7.1-38BDF8?style=for-the-badge&logo=android" alt="Sürüm v1.7.1" /></a>
+  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/S%C3%BCr%C3%BCm-v1.8.6-38BDF8?style=for-the-badge&logo=android" alt="Sürüm v1.8.6" /></a>
   <a href="https://play.google.com/apps/testing/io.omarchy.omasend"><img src="https://img.shields.io/badge/Google%20Play-Kapal%C4%B1%20Beta-34A853?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play Kapalı Beta" /></a>
   <a href="https://groups.google.com/g/omasend-testers"><img src="https://img.shields.io/badge/Google%20Grubu-Test%20Ekibi-4285F4?style=for-the-badge&logo=googlegroups&logoColor=white" alt="Google Grubuna Katıl" /></a>
   <a href="https://github.com/ozdil/omarchy-omasend"><img src="https://img.shields.io/badge/Omarchy%20Linux-Masa%C3%BCst%C3%BC%20Eklentisi-00ADD8?style=for-the-badge&logo=archlinux&logoColor=white" alt="Omarchy Linux Eklentisi" /></a>
@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/Lisans-MIT-blue?style=for-the-badge" alt="MIT Lisansı" /></a>
 </p>
 
-> **Android, Web PWA ve Omarchy Linux arasında yüksek performanslı, gizlilik odaklı yerel P2P dosya aktarımı, sistem paylaşım menüsü entegrasyonu, 16 haneli Luhn OmaID eşleşmesi ve gerçek zamanlı Wayland pano köprüsü.**
+> **Android, Web PWA ve Omarchy Linux arasında yüksek performanslı, gizlilik odaklı yerel P2P dosya aktarımı, Anonim Numaralı Kimlik (Sıfır Kayıt OmaID) ile Zero-Click Kendi Cihazlarım ağı, sistem paylaşım menüsü entegrasyonu ve gerçek zamanlı Wayland pano köprüsü.**
 
 ---
 
@@ -21,8 +21,8 @@
 
 Android için OmaSend, Omarchy Linux masaüstü arka plan motoru ve Web PWA istemcisiyle tam uyum içinde geliştirilmiştir:
 
-- **16 Haneli Luhn Mod 10 OmaID Eşleşmesi:** Sıfır hesap, sıfır sunucu; RFC 2104 HMAC-SHA256 Blinded Rendezvous konuları ve RFC 5869 HKDF-SHA256 simetrik anahtar türetimi ile güvenli eşleşme.
-- **AMOLED Zen Radar:** Karmaşık teknik veriler yerine temiz durum rozetleri (`[E2EE SECURE]`, `[LAN DIRECT]`, `[OMAID P2P]`) ve dokunsal titreşim geri bildirimi.
+- **Anonim Numaralı Kimlik (Sıfır Kayıt OmaID) & Zero-Click Kendi Cihazlarım:** Kayıt, e-posta veya kullanıcı adı gerektirmeyen ücretsiz ve açık kaynaklı 16 haneli Luhn mod-10 numaralı kimlik (`XXXX-XXXX-XXXX-XXXX`). Bilgisayarınıza ve telefonunuza aynı OmaID'yi girerek RFC 2104 HMAC-SHA256 Kör Randevu konuları, RFC 5869 HKDF-SHA256 anahtar türetimi ve sabit zamanlı (`MessageDigest.isEqual`) doğrulama ile sıfır izinli (Zero-Click) güven ağı kurun.
+- **AMOLED Zen Radar & Samuray Ses Efektleri:** Temiz durum rozetleri (`[E2EE SECURE]`, `[ZERO-CLICK]`, `[OMAID P2P]`), dokunsal titreşim geri bildirimi ve dosya gönderme (*"OMAKASE!"*) / alma (*"ONEGAI SHIMASU!"*) anlarında otantik samuray ses efektleri.
 - **Evrensel Çok Formatlı Pano Kasası:** Metin ve görseller için gerçek zamanlı çift yönlü pano senkronizasyonu ve otomatik WebP mikro önizleme önbelleği.
 - **Hassas Pano Kalkanı:** Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE` ve parola yöneticisi etiketlerini otomatik olarak tanır; hassas şifrelerin istem dışı aktarılmasını engeller.
 - **Sıfır Kopyalı ByteBuffers (`ASharedMemory` Mimarisi):** NDK katmanında optimize edilmiş bellek yönetimi ile çok gigabaytlık aktarımlarda Garbage Collection duraksamalarını tamamen ortadan kaldırır.

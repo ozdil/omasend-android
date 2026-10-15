@@ -63,12 +63,10 @@ NOTES_FILE="$DIST_DIR/release_notes_v${NEW_NAME}.txt"
 cat <<EOF > "$NOTES_FILE"
 <en-US>
 What's new in v${NEW_NAME}:
-• AirDrop-grade zero-click local P2P transfer
-• Zen Radar v2 with fluid UI & LRA haptics
-• Quantum-resilient BLAKE3 integrity & RAM zeroing
-• Android Quick Share & direct RFCOMM OBEX support
-• Low-latency Rust engine & targetSdk 36 compliance
-• UI layout and accessory filtering bug fixes
+- Anonymous Numbered OmaID (Zero-Click P2P transfer for same-owner devices)
+- Multi-file batch transfer, live progress tracking, and transfer cancellation
+- Authenticated clipboard vault sync and sound effects toggle
+- Hardened FileProvider, backup exclusion rules, and targetSdk 36 compliance
 </en-US>
 EOF
 

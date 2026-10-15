@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/Release-v1.7.1-38BDF8?style=for-the-badge&logo=android" alt="Release v1.7.1" /></a>
+  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/Release-v1.8.6-38BDF8?style=for-the-badge&logo=android" alt="Release v1.8.6" /></a>
   <a href="https://play.google.com/apps/testing/io.omarchy.omasend"><img src="https://img.shields.io/badge/Google%20Play-Closed%20Beta-34A853?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play Closed Beta" /></a>
   <a href="https://groups.google.com/g/omasend-testers"><img src="https://img.shields.io/badge/Google%20Group-Join%20Testers-4285F4?style=for-the-badge&logo=googlegroups&logoColor=white" alt="Join Google Group" /></a>
   <a href="https://github.com/ozdil/omarchy-omasend"><img src="https://img.shields.io/badge/Omarchy%20Linux-Desktop%20Plugin-00ADD8?style=for-the-badge&logo=archlinux&logoColor=white" alt="Omarchy Linux Desktop Plugin" /></a>
@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
 </p>
 
-> **High-performance, privacy-first local peer-to-peer file transfer, system share-sheet integration, 16-digit Luhn OmaID pairing, and real-time Wayland clipboard vault between Android, Web PWA, and Omarchy Linux.**
+> **High-performance, privacy-first local peer-to-peer file transfer, Anonymous Numbered Identity (Zero-Log OmaID) with Zero-Click My Devices mesh, system share-sheet integration, and real-time Wayland clipboard vault between Android, Web PWA, and Omarchy Linux.**
 
 ---
 
@@ -21,8 +21,8 @@
 
 OmaSend for Android is engineered in lockstep with the Omarchy Linux desktop daemon and Web PWA client:
 
-- **16-Digit Luhn Mod 10 OmaID Pairing:** Zero-account, zero-server device pairing using RFC 2104 HMAC-SHA256 Blinded Rendezvous topics and RFC 5869 HKDF-SHA256 symmetric key derivation.
-- **AMOLED Zen Radar:** Technical clutter is replaced with clean status indicators (`[E2EE SECURE]`, `[LAN DIRECT]`, `[OMAID P2P]`) and responsive tactile feedback.
+- **Anonymous Numbered Identity (Zero-Log OmaID) & Zero-Click My Devices:** Free and open-source 16-digit Luhn mod-10 numbered account identity (`XXXX-XXXX-XXXX-XXXX`). Enter the same OmaID on your PC and phone to form an instant Zero-Click trust mesh using RFC 2104 HMAC-SHA256 Blinded Rendezvous topics, RFC 5869 HKDF-SHA256 key derivation, and constant-time (`MessageDigest.isEqual`) verification.
+- **AMOLED Zen Radar & Samurai Audio Feedback:** Clean status indicators (`[E2EE SECURE]`, `[ZERO-CLICK]`, `[OMAID P2P]`), responsive tactile feedback, and authentic samurai sound effects on send (*"OMAKASE!"*) and receive/accept (*"ONEGAI SHIMASU!"*).
 - **Universal Multi-Format Clipboard Vault:** Real-time bi-directional clipboard sync supporting text and images with automatic WebP micro-thumbnail caching.
 - **Sensitive Clipboard Shield:** Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE` and password manager tags are automatically detected to protect credentials.
 - **Zero-Copy ByteBuffers (`ASharedMemory` Architecture):** Memory allocations are optimized at the NDK layer, eliminating Garbage Collection pauses during multi-gigabyte streams.
