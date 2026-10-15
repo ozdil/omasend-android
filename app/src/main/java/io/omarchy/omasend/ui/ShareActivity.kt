@@ -22,11 +22,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,10 +52,7 @@ import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.model.DiscoveredPeer
 import io.omarchy.omasend.model.TransferProgressState
 import io.omarchy.omasend.network.TransferBridge
-import io.omarchy.omasend.ui.theme.OmarchyCyan
-import io.omarchy.omasend.ui.theme.OmarchyDarkBg
-import io.omarchy.omasend.ui.theme.OmarchyTextPrimary
-import io.omarchy.omasend.ui.theme.OmarchyTextSecondary
+import io.omarchy.omasend.ui.theme.JetBrainsMonoFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -77,40 +74,50 @@ class ShareActivity : ComponentActivity() {
                 val peers by app.discoveryManager.peers.collectAsState()
                 var transferState by remember { mutableStateOf<TransferProgressState>(TransferProgressState.Idle) }
                 var showDirectIpDialog by remember { mutableStateOf(false) }
+                var showSendToAnotherOmaIdDialog by remember { mutableStateOf(false) }
+
+                val myDevices = remember(peers) { peers.filter { it.isSameOwner } }
+                val otherPeers = remember(peers) { peers.filter { !it.isSameOwner } }
 
                 Scaffold(
                     topBar = {
                         TopAppBar(
                             title = {
-                                Column {
-                                    Text(
-                                        "Share via OmaSend",
-                                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp
-                                    )
-                                    Text(
-                                        text = if (sharedUris.isNotEmpty()) "${sharedUris.size} file(s) selected" else "Text payload",
-                                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 12.sp
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OmarchyGeometricEmblem(modifier = Modifier.size(32.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "OmaSend ile Paylaş",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp
+                                        )
+                                        Text(
+                                            text = if (sharedUris.isNotEmpty()) "${sharedUris.size} dosya seçildi" else "Metin içeriği",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontSize = 12.sp
+                                        )
+                                    }
                                 }
                             },
                             actions = {
                                 IconButton(onClick = { finish() }) {
                                     Icon(
                                         Icons.Default.Close,
-                                        contentDescription = "Close",
-                                        tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                                        contentDescription = "Kapat",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+                                containerColor = MaterialTheme.colorScheme.surface
                             )
                         )
                     },
-                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background
+                    containerColor = MaterialTheme.colorScheme.background
                 ) { padding ->
                     Column(
                         modifier = Modifier
@@ -119,7 +126,13 @@ class ShareActivity : ComponentActivity() {
                             .padding(16.dp)
                     ) {
                         if (transferState !is TransferProgressState.Idle) {
-                            TransferStatusCard(state = transferState) {
+                            TransferStatusCard(
+                                state = transferState,
+                                onCancel = {
+                                    app.client.cancelActiveTransfer()
+                                    transferState = TransferProgressState.Error("Transfer kullanıcı tarafından iptal edildi.")
+                                }
+                            ) {
                                 if (transferState is TransferProgressState.Success) {
                                     finish()
                                 } else {
@@ -129,26 +142,17 @@ class ShareActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.height(16.dp))
                         }
 
-                        Text(
-                            "SELECT DESTINATION PEER",
-                            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-
                         if (peers.isEmpty()) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
-                                CircularProgressIndicator(color = androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    "Looking for nearby Omarchy PCs...",
-                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "Aynı OmaID'li ve çevredeki cihazlar aranıyor...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         } else {
@@ -156,36 +160,76 @@ class ShareActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(peers) { peer ->
-                                    PeerCard(
-                                        peer = peer,
-                                        isSelected = false,
-                                        onClick = {
-                                            scope.launch {
-                                                handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                    transferState = state
+                                if (myDevices.isNotEmpty()) {
+                                    item {
+                                        SectionHeaderRow(
+                                            title = "KENDİ CİHAZLARIM (AYNI OMAID • ZERO-CLICK)",
+                                            count = myDevices.size,
+                                            accentColor = Color(0xFF10B981)
+                                        )
+                                    }
+                                    items(myDevices, key = { "share_my_${it.id}" }) { peer ->
+                                        PeerCard(
+                                            peer = peer,
+                                            isSelected = false,
+                                            onClick = {
+                                                scope.launch {
+                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
+                                                        transferState = state
+                                                    }
+                                                }
+                                            },
+                                            onSendFile = {
+                                                scope.launch {
+                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
+                                                        transferState = state
+                                                    }
                                                 }
                                             }
-                                        },
-                                        onSendFile = {
-                                            scope.launch {
-                                                handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                    transferState = state
+                                        )
+                                    }
+                                }
+
+                                if (otherPeers.isNotEmpty()) {
+                                    item {
+                                        SectionHeaderRow(
+                                            title = "ÇEVREDEKİ CİHAZLAR & FARKLI OMAID",
+                                            count = otherPeers.size,
+                                            accentColor = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                    items(otherPeers, key = { "share_other_${it.id}" }) { peer ->
+                                        PeerCard(
+                                            peer = peer,
+                                            isSelected = false,
+                                            onClick = {
+                                                scope.launch {
+                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
+                                                        transferState = state
+                                                    }
+                                                }
+                                            },
+                                            onSendFile = {
+                                                scope.launch {
+                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
+                                                        transferState = state
+                                                    }
                                                 }
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            "OTHER WAYS TO SEND",
+                            text = "DİĞER GÖNDERİM SEÇENEKLERİ",
                             color = MaterialTheme.colorScheme.primary,
-                            fontSize = 12.sp,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.8.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
 
@@ -194,11 +238,21 @@ class ShareActivity : ComponentActivity() {
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { showDirectIpDialog = true },
-                                modifier = Modifier.weight(1f),
+                                onClick = { showSendToAnotherOmaIdDialog = true },
+                                modifier = Modifier.weight(1.2f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Farklı OmaID", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showDirectIpDialog = true },
+                                modifier = Modifier.weight(0.9f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Manuel IP", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             }
@@ -211,9 +265,9 @@ class ShareActivity : ComponentActivity() {
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sistem Paylaşımı", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Sistem", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -223,11 +277,39 @@ class ShareActivity : ComponentActivity() {
                     DirectIpDialog(
                         onDismiss = { showDirectIpDialog = false },
                         onConnect = { ip, port ->
+                            showDirectIpDialog = false
                             val manualPeer = TransferBridge.createManualPeer(ip, port)
                             scope.launch {
                                 handleSendToPeer(app, manualPeer, sharedUris, sharedText) { state ->
                                     transferState = state
                                 }
+                            }
+                        }
+                    )
+                }
+
+                if (showSendToAnotherOmaIdDialog) {
+                    SendToAnotherOmaIdDialog(
+                        onDismiss = { showSendToAnotherOmaIdDialog = false },
+                        onConfirmSend = { targetOmaId, optionalIp, optionalPort ->
+                            showSendToAnotherOmaIdDialog = false
+                            val targetPeer = app.discoveryManager.resolveOrCreatePeerForOmaId(
+                                targetOmaId = targetOmaId,
+                                fallbackIp = optionalIp,
+                                fallbackPort = optionalPort
+                            )
+                            if (targetPeer != null && targetPeer.ip.isNotBlank()) {
+                                scope.launch {
+                                    handleSendToPeer(app, targetPeer, sharedUris, sharedText) { state ->
+                                        transferState = state
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(
+                                    this@ShareActivity,
+                                    "Hedef OmaID ($targetOmaId) için çevrimiçi IP bulunamadı; IP adresini de girerek tekrar deneyebilirsiniz.",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         }
                     )
@@ -244,17 +326,17 @@ class ShareActivity : ComponentActivity() {
         onState: (TransferProgressState) -> Unit
     ) {
         if (uris.isNotEmpty()) {
-            for (uri in uris) {
-                sendFileUriToPeer(this, app, peer, uri, onState)
-            }
+            sendMultipleUrisToPeer(this, app, peer, uris, onState)
         } else if (!text.isNullOrEmpty()) {
             withContext(Dispatchers.IO) {
-                val res = app.client.sendClipboard(peer.ip, peer.port, text)
+                val res = app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
                 withContext(Dispatchers.Main) {
                     if (res.isSuccess) {
-                        onState(TransferProgressState.Success("Text sent to '${peer.name}'"))
+                        app.soundEngine.playSendSound()
+                        app.hapticController.onDropBounce()
+                        onState(TransferProgressState.Success("Metin '${peer.name}' cihazına gönderildi"))
                     } else {
-                        onState(TransferProgressState.Error(res.exceptionOrNull()?.message ?: "Failed to send text"))
+                        onState(TransferProgressState.Error(res.exceptionOrNull()?.message ?: "Metin gönderilemedi"))
                     }
                 }
             }

@@ -3,12 +3,14 @@ package io.omarchy.omasend.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 
 private val DarkColorScheme = darkColorScheme(
     primary = OmarchyCyan,
@@ -55,10 +57,31 @@ private val LightColorScheme = lightColorScheme(
     error = OmarchyRed
 )
 
+val JetBrainsMonoFontFamily: FontFamily = FontFamily.Monospace
+
+private val DefaultTypography = Typography()
+private val OmarchyTypography = Typography(
+    displayLarge = DefaultTypography.displayLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+    displayMedium = DefaultTypography.displayMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+    displaySmall = DefaultTypography.displaySmall.copy(fontFamily = JetBrainsMonoFontFamily),
+    headlineLarge = DefaultTypography.headlineLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+    headlineMedium = DefaultTypography.headlineMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+    headlineSmall = DefaultTypography.headlineSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+    titleLarge = DefaultTypography.titleLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+    titleMedium = DefaultTypography.titleMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+    titleSmall = DefaultTypography.titleSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+    bodyLarge = DefaultTypography.bodyLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+    bodyMedium = DefaultTypography.bodyMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+    bodySmall = DefaultTypography.bodySmall.copy(fontFamily = JetBrainsMonoFontFamily),
+    labelLarge = DefaultTypography.labelLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+    labelMedium = DefaultTypography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+    labelSmall = DefaultTypography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily)
+)
+
 @Composable
 fun OmaSendTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -72,8 +95,7 @@ fun OmaSendTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = OmarchyTypography,
         content = content
     )
 }
-
-val JetBrainsMonoFontFamily = androidx.compose.ui.text.font.FontFamily.Monospace

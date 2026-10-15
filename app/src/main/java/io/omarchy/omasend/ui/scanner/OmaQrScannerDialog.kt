@@ -90,6 +90,16 @@ fun OmaQrScannerDialog(
     var detectedOmaId by remember { mutableStateOf<String?>(null) }
     var isScanningActive by remember { mutableStateOf(true) }
 
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                cameraInstance?.cameraControl?.enableTorch(false)
+                analysisExecutor.shutdown()
+            } catch (_: Exception) {}
+        }
+    }
+
     val analyzer = remember {
         OmaIdQrAnalyzer { id ->
             if (isScanningActive && detectedOmaId == null) {
@@ -157,7 +167,7 @@ fun OmaQrScannerDialog(
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                                 .build()
                                 .also {
-                                    it.setAnalyzer(Executors.newSingleThreadExecutor(), analyzer)
+                                    it.setAnalyzer(analysisExecutor, analyzer)
                                 }
 
                             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA

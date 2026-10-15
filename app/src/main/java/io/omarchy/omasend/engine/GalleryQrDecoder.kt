@@ -21,15 +21,12 @@ object GalleryQrDecoder {
      */
     suspend fun decodeOmaIdFromUri(context: Context, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val inputStream: InputStream = context.contentResolver.openInputStream(uri)
-                ?: throw IllegalArgumentException("Dosya acilamadi: $uri")
-
-            // Decode bitmap with bounded dimensions
-            val options = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val bitmap = BitmapFactory.decodeStream(inputStream, null, options)
-                ?: throw IllegalStateException("Gorsel decode edilemedi")
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val options = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                BitmapFactory.decodeStream(inputStream, null, options)
+            } ?: throw IllegalStateException("Gorsel decode edilemedi: $uri")
 
             try {
                 val intArray = IntArray(bitmap.width * bitmap.height)
