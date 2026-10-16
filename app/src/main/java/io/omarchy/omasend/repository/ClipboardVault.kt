@@ -159,6 +159,20 @@ class ClipboardVault private constructor(private val context: Context) {
         _lastReceivedHash.set(hash)
     }
 
+    /**
+     * Atomically records [hash] and returns true if it was not known yet. MainActivity and the
+     * foreground service both listen for clipboard changes; with a separate check-then-record the
+     * same clip could be processed (and pushed to peers) twice.
+     */
+    fun recordIfNew(hash: String): Boolean {
+        if (hash.isBlank()) return false
+        synchronized(hashRingLock) {
+            if (recentHashRing.contains(hash)) return false
+            recordHash(hash)
+            return true
+        }
+    }
+
     fun isKnownHash(hash: String): Boolean {
         if (hash.isBlank()) return false
         return synchronized(hashRingLock) {
@@ -396,11 +410,10 @@ class ClipboardVault private constructor(private val context: Context) {
             }
 
             val hash = computeHash(text)
-            if (isKnownHash(hash)) {
+            if (!recordIfNew(hash)) {
                 return
             }
 
-            recordHash(hash)
             val deviceName = NetworkUtils.getDeviceName(context)
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 
