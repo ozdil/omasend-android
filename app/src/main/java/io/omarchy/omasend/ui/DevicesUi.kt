@@ -376,15 +376,16 @@ fun AddDeviceSheet(
     LaunchedEffect(showQr, ownDevice, refreshTick) {
         if (!showQr) return@LaunchedEffect
         qr = null
-        qr = withContext(Dispatchers.Default) {
-            val id = DeviceKey.identity(app)
+        // IO: the device key needs the Keystore and the QUIC port may still be binding.
+        qr = withContext(Dispatchers.IO) {
+            val id = DeviceKey.identityOrNull(app) ?: return@withContext null
             val uri = DeviceKey.createPairOffer(
                 id,
                 NetworkUtils.getDeviceName(app),
                 NetworkUtils.getLocalIpAddress(),
                 NetworkUtils.PORT,
                 ownDevice,
-                CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+                CoreNode.advertisedQuicPort()
             )
             qrBitmap(uri)
         }

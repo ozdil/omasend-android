@@ -42,41 +42,72 @@ class OmaSendServer(private val context: Context) {
         ignoreUnknownKeys = true
     }
 
-    // Token -> PendingTransfer
-    data class PendingState(
-        val prompt: IncomingTransferPrompt,
-        val expiresAt: Long,
-        var status: String, // "PENDING", "ACCEPTED", "REJECTED"
-        val remainingFiles: AtomicInteger = AtomicInteger(prompt.files.size.coerceAtLeast(1)),
-        /** v2: key of the verified sender; uploads must be signed by the same key. */
-        val senderPk: String? = null
-    )
-
-    private val pendingTransfers = ConcurrentHashMap<String, PendingState>()
+    // Token -> legacy HTTP transfer (A7/A8/A9: lifetime, approved-file binding, caps)
+    private val pendingTransfers = PendingTransferRegistry()
 
     // Protocol v2 (Phase 1): QR-paired Ed25519 device keys.
     private val trustStore by lazy { DeviceKey.TrustStore(context) }
-    private val deviceIdentity by lazy { DeviceKey.identity(context) }
+    /** Throws DeviceKey.DeviceKeyUnavailableException while the stored key cannot be read. */
+    private val deviceIdentity: DeviceKey.Identity
+        get() = DeviceKey.identity(context)
     var onDevicePaired: ((String) -> Unit)? = null
 
     private fun v2Verify(headers: Map<String, String>, method: String, pathAndQuery: String, bodyTag: String, peerIp: String) =
         DeviceKey.verifyRequest(trustStore, headers, method, pathAndQuery, bodyTag, peerIp)
 
-    private fun readBodyBounded(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): ByteArray? {
-        if (contentLength < 0 || contentLength > max) return null
+    private sealed class BodyResult {
+        class Ok(val bytes: ByteArray) : BodyResult()
+        /** Missing, empty or larger than allowed. */
+        object Invalid : BodyResult()
+        object TimedOut : BodyResult()
+        /** The peer closed the connection before Content-Length bytes arrived. */
+        object Incomplete : BodyResult()
+    }
+
+    /** Reads exactly [contentLength] (1..[max]) bytes before the monotonic [deadlineMs]. */
+    private fun readBody(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): BodyResult {
+        if (contentLength <= 0 || contentLength > max) return BodyResult.Invalid
         val bytes = ByteArray(contentLength.toInt())
         var total = 0
         while (total < bytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) return null
+            if (System.currentTimeMillis() > deadlineMs) return BodyResult.TimedOut
             val r = try {
                 input.read(bytes, total, bytes.size - total)
             } catch (_: java.net.SocketTimeoutException) {
                 continue
             }
-            if (r == -1) return null
+            if (r == -1) return BodyResult.Incomplete
             total += r
         }
-        return bytes
+        return BodyResult.Ok(bytes)
+    }
+
+    /** [readBody] for callers that only need the bytes (null on any failure). */
+    private fun readBodyBounded(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): ByteArray? =
+        (readBody(input, contentLength, max, deadlineMs) as? BodyResult.Ok)?.bytes
+
+    /** [readBody] for control endpoints: on failure sends the error response and returns null. */
+    private fun readBodyOrRespond(
+        input: InputStream,
+        output: OutputStream,
+        contentLength: Long,
+        max: Long,
+        deadlineMs: Long,
+        timeoutMessage: String = "Request body timed out"
+    ): ByteArray? = when (val r = readBody(input, contentLength, max, deadlineMs)) {
+        is BodyResult.Ok -> r.bytes
+        BodyResult.Invalid -> {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
+            null
+        }
+        BodyResult.TimedOut -> {
+            sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"$timeoutMessage\"}")
+            null
+        }
+        BodyResult.Incomplete -> {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
+            null
+        }
     }
 
     var onIncomingTransferPrompt: ((IncomingTransferPrompt) -> Unit)? = null
@@ -123,8 +154,7 @@ class OmaSendServer(private val context: Context) {
             CoreNode.respond(token, true)
             return
         }
-        val state = pendingTransfers[token] ?: return
-        state.status = "ACCEPTED"
+        val state = pendingTransfers.accept(token) ?: return
         addTrustedPeer(state.prompt.senderId)
     }
 
@@ -133,7 +163,7 @@ class OmaSendServer(private val context: Context) {
             CoreNode.respond(token, false)
             return
         }
-        pendingTransfers[token]?.status = "REJECTED"
+        pendingTransfers.reject(token)
     }
 
     fun start() {
@@ -306,7 +336,7 @@ class OmaSendServer(private val context: Context) {
             val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
             val headerOmaId = headers["x-omasend-omaid"] ?: getQueryParam(query, "oma_id").ifBlank { null }
             val queryToken = getQueryParam(query, "token").ifBlank { null }
-            val hasValidActiveToken = queryToken != null && pendingTransfers.containsKey(queryToken)
+            val hasValidActiveToken = queryToken != null && pendingTransfers.isActive(queryToken)
 
             if (!isPrivatePeer && !isPairedOrKnownOmaId(headerOmaId) && !hasValidActiveToken &&
                 method != "POST" // POST /api/p2p/request and /api/p2p/clipboard may carry oma_id inside JSON body
@@ -397,34 +427,7 @@ class OmaSendServer(private val context: Context) {
         deadlineMs: Long,
         pathAndQuery: String = "/api/p2p/request"
     ) {
-        if (contentLength <= 0 || contentLength > MAX_CONTROL_BODY) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
-        val bodyBytes = ByteArray(contentLength.toInt())
-        var totalRead = 0
-        while (totalRead < bodyBytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) {
-                sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Request body timed out\"}")
-                return
-            }
-            val r = try {
-                input.read(bodyBytes, totalRead, bodyBytes.size - totalRead)
-            } catch (_: java.net.SocketTimeoutException) {
-                if (System.currentTimeMillis() > deadlineMs) {
-                    sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Request body timed out\"}")
-                    return
-                }
-                continue
-            }
-            if (r == -1) break
-            totalRead += r
-        }
-
-        if (totalRead < bodyBytes.size) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
-            return
-        }
+        val bodyBytes = readBodyOrRespond(input, output, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs) ?: return
 
         try {
             val bodyJson = String(bodyBytes, Charsets.UTF_8)
@@ -471,22 +474,38 @@ class OmaSendServer(private val context: Context) {
             // Phase 1: only a cryptographically verified key that was QR-paired as "own device"
             // may auto-accept. A claimed OmaID never does.
             if (verifiedKey != null && verifiedKey.own_device) {
-                pendingTransfers[token] = PendingState(
-                    prompt = prompt,
-                    expiresAt = System.currentTimeMillis() + 600000L,
-                    status = "ACCEPTED",
-                    senderPk = verifiedKey.pk
+                val added = pendingTransfers.add(
+                    token,
+                    PendingTransferRegistry.Entry(
+                        prompt = prompt,
+                        sourceIp = peerIp,
+                        status = PendingTransferRegistry.STATUS_ACCEPTED,
+                        expiresAt = System.currentTimeMillis() + PendingTransferRegistry.ACCEPTED_TTL_MS,
+                        senderPk = verifiedKey.pk
+                    )
                 )
+                if (added != PendingTransferRegistry.AddResult.Added) {
+                    sendTooManyPending(output)
+                    return
+                }
                 sendResponse(output, 200, "OK", "application/json", """{"status":"ACCEPTED","token":"$token","verified_device":true}""")
                 return
             }
 
-            pendingTransfers[token] = PendingState(
-                prompt = prompt,
-                expiresAt = System.currentTimeMillis() + 30000L,
-                status = "PENDING",
-                senderPk = verifiedKey?.pk
+            val added = pendingTransfers.add(
+                token,
+                PendingTransferRegistry.Entry(
+                    prompt = prompt,
+                    sourceIp = peerIp,
+                    status = PendingTransferRegistry.STATUS_PENDING,
+                    expiresAt = System.currentTimeMillis() + PendingTransferRegistry.PENDING_TTL_MS,
+                    senderPk = verifiedKey?.pk
+                )
             )
+            if (added != PendingTransferRegistry.AddResult.Added) {
+                sendTooManyPending(output)
+                return
+            }
 
             Handler(Looper.getMainLooper()).post {
                 onIncomingTransferPrompt?.invoke(prompt)
@@ -499,15 +518,19 @@ class OmaSendServer(private val context: Context) {
         }
     }
 
+    private fun sendTooManyPending(output: OutputStream) {
+        sendResponse(output, 429, "Too Many Requests", "application/json", "{\"error\":\"Too many pending transfer requests\"}")
+    }
+
     private fun handleDecisionQuery(output: OutputStream, query: String) {
         val token = getQueryParam(query, "token")
-        val state = pendingTransfers[token]
+        val state = pendingTransfers.get(token)
         if (state == null) {
             sendResponse(output, 404, "Not Found", "application/json", "{\"status\":\"NOT_FOUND\"}")
             return
         }
 
-        if (System.currentTimeMillis() > state.expiresAt) {
+        if (pendingTransfers.isExpired(state)) {
             pendingTransfers.remove(token)
             sendResponse(output, 200, "OK", "application/json", "{\"status\":\"EXPIRED\"}")
             return
@@ -540,8 +563,8 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        val state = pendingTransfers[token]
-        if (state == null || state.status != "ACCEPTED" || System.currentTimeMillis() > state.expiresAt) {
+        val state = pendingTransfers.get(token)
+        if (state == null || state.status != PendingTransferRegistry.STATUS_ACCEPTED || pendingTransfers.isExpired(state)) {
             sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized or expired transfer\"}")
             return
         }
@@ -554,29 +577,43 @@ class OmaSendServer(private val context: Context) {
             }
         }
 
+        // A8: the upload must be one of the files the user approved (name and size), not yet received.
+        val fileIndex = state.claim(filename, contentLength)
+        if (fileIndex < 0) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"File is not part of the approved transfer\"}")
+            return
+        }
+
         // Extend token expiration while active upload is in progress for multi-file batches
         val uploadDurationMs = 60000L + ((contentLength / (256 * 1024L)) * 1000L).coerceAtLeast(30000L)
         val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
-        pendingTransfers[token] = state.copy(expiresAt = uploadDeadline + 30000L)
+        pendingTransfers.refresh(state, uploadDeadline + 30000L)
 
         // Configure socket timeout for active continuous streaming (30 seconds per I/O chunk)
         try {
             socket.soTimeout = 30000
         } catch (_: Exception) {}
 
-        val (saved, finalName) = NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
-            StorageUtils.saveIncomingStream(
-                context = context,
-                filename = filename,
-                inputStream = input,
-                totalBytes = contentLength,
-                deadlineMs = uploadDeadline
-            )
+        val (saved, finalName) = try {
+            NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
+                StorageUtils.saveIncomingStream(
+                    context = context,
+                    filename = filename,
+                    inputStream = input,
+                    totalBytes = contentLength,
+                    deadlineMs = uploadDeadline
+                )
+            }
+        } catch (t: Throwable) {
+            state.release(fileIndex)
+            throw t
         }
 
         if (saved) {
-            if (state.remainingFiles.decrementAndGet() <= 0) {
+            if (state.complete(fileIndex)) {
                 pendingTransfers.remove(token)
+            } else {
+                pendingTransfers.refresh(state, System.currentTimeMillis())
             }
             val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
             Handler(Looper.getMainLooper()).post {
@@ -589,6 +626,7 @@ class OmaSendServer(private val context: Context) {
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } else {
+            state.release(fileIndex)
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
         }
     }
@@ -664,7 +702,7 @@ class OmaSendServer(private val context: Context) {
             }
             return
         }
-        val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+        val myQuic = CoreNode.advertisedQuicPort()
         linkResponder.finish(deviceIdentity, NetworkUtils.getDeviceName(context), myQuic, peerIp, obj, now)
             .onSuccess { (peer, reply) ->
                 if (OmaLink.isRevoked(context, peer.pk)) {
@@ -693,18 +731,19 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handlePairV2(input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
-        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
-        if (body == null) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
+        val body = readBodyOrRespond(input, output, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs) ?: return
         val obj = try {
             json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
         } catch (_: Exception) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
             return
         }
-        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT)
+        val identity = DeviceKey.identityOrNull(context)
+        if (identity == null) {
+            sendResponse(output, 503, "Service Unavailable", "application/json", "{\"error\":\"Device key unavailable on this device\"}")
+            return
+        }
+        DeviceKey.acceptPairRequest(identity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.advertisedQuicPort())
             .onSuccess { (resp, key) ->
                 trustStore.upsert(key)
                 Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }
@@ -769,35 +808,9 @@ class OmaSendServer(private val context: Context) {
         }
 
         // 2. Monotonic body reading
-        if (contentLength <= 0 || contentLength > MAX_CLIPBOARD_BODY) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
-
-        val bodyBytes = ByteArray(contentLength.toInt())
-        var totalRead = 0
-        while (totalRead < bodyBytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) {
-                sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Clipboard read timed out\"}")
-                return
-            }
-            val r = try {
-                input.read(bodyBytes, totalRead, bodyBytes.size - totalRead)
-            } catch (_: java.net.SocketTimeoutException) {
-                if (System.currentTimeMillis() > deadlineMs) {
-                    sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Clipboard read timed out\"}")
-                    return
-                }
-                continue
-            }
-            if (r == -1) break
-            totalRead += r
-        }
-
-        if (totalRead < bodyBytes.size) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
-            return
-        }
+        val bodyBytes = readBodyOrRespond(
+            input, output, contentLength, MAX_CLIPBOARD_BODY.toLong(), deadlineMs, "Clipboard read timed out"
+        ) ?: return
 
         val bodyJson = String(bodyBytes, Charsets.UTF_8)
         val payload = try {
@@ -815,24 +828,21 @@ class OmaSendServer(private val context: Context) {
             io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
             else -> ""
         }
-        val providedPin = headers["x-omasend-pin"]
-            ?: getQueryParam(query, "pin").ifBlank { null }
-            ?: payload.pin
+        // A15: secrets are accepted only in headers or the JSON body, never in the URL query
+        // (neither the desktop nor the Android client sends them there; URLs end up in logs).
+        val providedPin = headers["x-omasend-pin"] ?: payload.pin
 
         val providedKey = headers["x-omasend-key"]
             ?: headers["authorization"]?.removePrefix("Bearer ")?.trim()
-            ?: getQueryParam(query, "token").ifBlank { null }
             ?: payload.token
 
         val expectedPin = NetworkUtils.getDevicePin(context)
         val expectedSessionKey = NetworkUtils.getDeviceSessionKey(context)
 
-        val isPinValid = !providedPin.isNullOrBlank() && providedPin == expectedPin
-        val isKeyValid = !providedKey.isNullOrBlank() && providedKey == expectedSessionKey
-
-        val isTokenValid = !providedKey.isNullOrBlank() &&
-            pendingTransfers[providedKey]?.status == "ACCEPTED" &&
-            System.currentTimeMillis() <= (pendingTransfers[providedKey]?.expiresAt ?: 0L)
+        // Constant-time comparisons. An accepted file-transfer token no longer authorizes
+        // clipboard writes: it was never meant as a clipboard credential.
+        val isPinValid = !providedPin.isNullOrBlank() && constantTimeEquals(providedPin, expectedPin)
+        val isKeyValid = !providedKey.isNullOrBlank() && constantTimeEquals(providedKey, expectedSessionKey)
 
         // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
         // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
@@ -845,7 +855,7 @@ class OmaSendServer(private val context: Context) {
         }
         val isVerifiedDevice = v2 is DeviceKey.AuthResult.Trusted
 
-        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid || isTokenValid
+        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -863,7 +873,7 @@ class OmaSendServer(private val context: Context) {
                     401,
                     "Unauthorized",
                     "application/json",
-                    "{\"error\":\"Unauthorized clipboard write: valid OmaID, PIN, session key, or paired token required\"}"
+                    "{\"error\":\"Unauthorized clipboard write: paired device key, paired OmaID, PIN or session key required\"}"
                 )
             }
             return
@@ -946,6 +956,14 @@ class OmaSendServer(private val context: Context) {
         } catch (_: Exception) {
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to read image\"}")
         }
+    }
+
+    private fun constantTimeEquals(provided: String, expected: String?): Boolean {
+        if (expected.isNullOrEmpty()) return false
+        return java.security.MessageDigest.isEqual(
+            provided.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8)
+        )
     }
 
     private fun getQueryParam(query: String, param: String): String {

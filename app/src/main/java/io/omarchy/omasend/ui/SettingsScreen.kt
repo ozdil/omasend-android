@@ -101,7 +101,7 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
     var revealed by remember { mutableStateOf(false) }
     var deviceName by remember { mutableStateOf(NetworkUtils.getDeviceName(context)) }
     var soundOn by remember { mutableStateOf(app.soundEngine.isSoundEnabled()) }
-    val deviceId = remember { DeviceKey.identity(context).deviceId }
+    val deviceId = remember { DeviceKey.identityOrNull(context)?.deviceId ?: "—" }
 
     var showOmaIdEntry by remember { mutableStateOf(false) }
     var showOmaIdReset by remember { mutableStateOf(false) }
