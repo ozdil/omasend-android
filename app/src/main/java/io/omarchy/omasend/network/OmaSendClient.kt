@@ -125,7 +125,7 @@ class OmaSendClient(private val context: Context) {
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         client.newCall(request).execute().use { response ->
-            val text = response.body?.string() ?: error("Empty response")
+            val text = response.body.string().ifEmpty { error("Empty response") }
             val obj = json.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject ?: error("Malformed response")
             if (!response.isSuccessful) {
                 error((obj["error"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Pairing rejected (${response.code})")
@@ -193,7 +193,7 @@ class OmaSendClient(private val context: Context) {
             }
 
             client.newCall(requestBuilder.build()).execute().use { response ->
-                val respBody = response.body?.string() ?: return Result.failure(Exception("Empty response"))
+                val respBody = response.body.string().ifEmpty { return Result.failure(Exception("Empty response")) }
                 val transferResp = json.decodeFromString<TransferResponse>(respBody)
 
                 if (transferResp.token != null) {
@@ -245,7 +245,7 @@ class OmaSendClient(private val context: Context) {
                 }
 
                 val decision = client.newCall(reqBuilder.build()).execute().use { response ->
-                    val respBody = response.body?.string() ?: ""
+                    val respBody = response.body.string()
                     json.decodeFromString<TransferDecision>(respBody)
                 }
 
@@ -456,7 +456,7 @@ class OmaSendClient(private val context: Context) {
                 if (!response.isSuccessful) {
                     return Result.failure(Exception("HTTP ${response.code} fetching clipboard image"))
                 }
-                val body = response.body ?: return Result.failure(Exception("Empty image body"))
+                val body = response.body
                 val bytes = body.bytes()
                 if (bytes.size > 10 * 1024 * 1024) {
                     return Result.failure(Exception("Image exceeds 10 MiB limit"))

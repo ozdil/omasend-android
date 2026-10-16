@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -22,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
@@ -44,11 +42,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.omarchy.omasend.OmaSendApp
+import io.omarchy.omasend.crypto.DeviceKey
+import io.omarchy.omasend.network.CoreNode
 import io.omarchy.omasend.model.DiscoveredPeer
 import io.omarchy.omasend.model.TransferProgressState
 import io.omarchy.omasend.network.TransferBridge
@@ -71,13 +70,15 @@ class ShareActivity : ComponentActivity() {
         setContent {
             io.omarchy.omasend.ui.theme.OmaSendTheme {
                 val scope = rememberCoroutineScope()
-                val peers by app.discoveryManager.peers.collectAsState()
+                val lists = rememberDeviceLists(app)
                 var transferState by remember { mutableStateOf<TransferProgressState>(TransferProgressState.Idle) }
                 var showDirectIpDialog by remember { mutableStateOf(false) }
-                var showSendToAnotherOmaIdDialog by remember { mutableStateOf(false) }
 
-                val myDevices = remember(peers) { peers.filter { it.isSameOwner } }
-                val otherPeers = remember(peers) { peers.filter { !it.isSameOwner } }
+                fun sendTo(peer: DiscoveredPeer) {
+                    scope.launch {
+                        handleSendToPeer(app, peer, sharedUris, sharedText) { state -> transferState = state }
+                    }
+                }
 
                 Scaffold(
                     topBar = {
@@ -88,14 +89,14 @@ class ShareActivity : ComponentActivity() {
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
                                         Text(
-                                            text = "OmaSend ile Paylaş",
+                                            text = OmaI18n.t("share_title"),
                                             color = MaterialTheme.colorScheme.primary,
                                             fontFamily = JetBrainsMonoFontFamily,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 18.sp
                                         )
                                         Text(
-                                            text = if (sharedUris.isNotEmpty()) "${sharedUris.size} dosya seçildi" else "Metin içeriği",
+                                            text = if (sharedUris.isNotEmpty()) OmaI18n.f("n_files", sharedUris.size) else OmaI18n.t("text_content"),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontFamily = JetBrainsMonoFontFamily,
                                             fontSize = 12.sp
@@ -105,16 +106,10 @@ class ShareActivity : ComponentActivity() {
                             },
                             actions = {
                                 IconButton(onClick = { finish() }) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Kapat",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Icon(Icons.Default.Close, contentDescription = OmaI18n.t("close"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                         )
                     },
                     containerColor = MaterialTheme.colorScheme.background
@@ -130,19 +125,15 @@ class ShareActivity : ComponentActivity() {
                                 state = transferState,
                                 onCancel = {
                                     app.client.cancelActiveTransfer()
-                                    transferState = TransferProgressState.Error("Transfer kullanıcı tarafından iptal edildi.")
+                                    transferState = TransferProgressState.Error(OmaI18n.t("cancelled"))
                                 }
                             ) {
-                                if (transferState is TransferProgressState.Success) {
-                                    finish()
-                                } else {
-                                    transferState = TransferProgressState.Idle
-                                }
+                                if (transferState is TransferProgressState.Success) finish() else transferState = TransferProgressState.Idle
                             }
                             Spacer(modifier = Modifier.height(16.dp))
                         }
 
-                        if (peers.isEmpty()) {
+                        if (lists.paired.isEmpty() && lists.nearby.isEmpty()) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -150,113 +141,54 @@ class ShareActivity : ComponentActivity() {
                             ) {
                                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Aynı OmaID'li ve çevredeki cihazlar aranıyor...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text(text = OmaI18n.t("searching_devices"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         } else {
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                if (myDevices.isNotEmpty()) {
+                                if (lists.paired.isNotEmpty()) {
                                     item {
-                                        SectionHeaderRow(
-                                            title = "KENDİ CİHAZLARIM (AYNI OMAID)",
-                                            count = myDevices.size,
-                                            accentColor = Color(0xFF10B981)
-                                        )
+                                        SectionHeaderRow(title = OmaI18n.t("section_my_devices"), count = lists.paired.size, accentColor = Emerald)
                                     }
-                                    items(myDevices, key = { "share_my_${it.id}" }) { peer ->
-                                        PeerCard(
-                                            peer = peer,
-                                            isSelected = false,
-                                            onClick = {
-                                                scope.launch {
-                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                        transferState = state
-                                                    }
-                                                }
-                                            },
-                                            onSendFile = {
-                                                scope.launch {
-                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                        transferState = state
-                                                    }
-                                                }
-                                            }
+                                    items(lists.paired, key = { "share_k_${it.key.pk}" }) { d ->
+                                        val handle = d.asPeer()
+                                        PairedDeviceCard(
+                                            device = d,
+                                            selected = false,
+                                            onSelect = { sendTo(handle) },
+                                            onSend = { sendTo(handle) },
+                                            onClipboard = { sendTo(handle) },
+                                            onRemove = { DeviceKey.TrustStore(this@ShareActivity).remove(d.key.pk) }
                                         )
                                     }
                                 }
-
-                                if (otherPeers.isNotEmpty()) {
+                                if (lists.nearby.isNotEmpty()) {
                                     item {
-                                        SectionHeaderRow(
-                                            title = "ÇEVREDEKİ CİHAZLAR & FARKLI OMAID",
-                                            count = otherPeers.size,
-                                            accentColor = MaterialTheme.colorScheme.secondary
-                                        )
+                                        SectionHeaderRow(title = OmaI18n.t("section_nearby"), count = lists.nearby.size, accentColor = MaterialTheme.colorScheme.secondary)
                                     }
-                                    items(otherPeers, key = { "share_other_${it.id}" }) { peer ->
-                                        PeerCard(
-                                            peer = peer,
-                                            isSelected = false,
-                                            onClick = {
-                                                scope.launch {
-                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                        transferState = state
-                                                    }
-                                                }
-                                            },
-                                            onSendFile = {
-                                                scope.launch {
-                                                    handleSendToPeer(app, peer, sharedUris, sharedText) { state ->
-                                                        transferState = state
-                                                    }
-                                                }
-                                            }
-                                        )
+                                    items(lists.nearby, key = { "share_n_${it.id}" }) { peer ->
+                                        NearbyPeerCard(peer = peer, selected = false, onSelect = { sendTo(peer) }, onSend = { sendTo(peer) })
                                     }
                                 }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
-                        Text(
-                            text = "DİĞER GÖNDERİM SEÇENEKLERİ",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontFamily = JetBrainsMonoFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { showSendToAnotherOmaIdDialog = true },
-                                modifier = Modifier.weight(1.2f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Farklı OmaID", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            OutlinedButton(
                                 onClick = { showDirectIpDialog = true },
-                                modifier = Modifier.weight(0.9f),
+                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Manuel IP", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text(OmaI18n.t("add_ip"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
-
                             OutlinedButton(
                                 onClick = {
                                     TransferBridge.shareViaSystem(this@ShareActivity, sharedUris, sharedText)
@@ -267,7 +199,7 @@ class ShareActivity : ComponentActivity() {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Sistem", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text(OmaI18n.t("system_share"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -278,39 +210,7 @@ class ShareActivity : ComponentActivity() {
                         onDismiss = { showDirectIpDialog = false },
                         onConnect = { ip, port ->
                             showDirectIpDialog = false
-                            val manualPeer = TransferBridge.createManualPeer(ip, port)
-                            scope.launch {
-                                handleSendToPeer(app, manualPeer, sharedUris, sharedText) { state ->
-                                    transferState = state
-                                }
-                            }
-                        }
-                    )
-                }
-
-                if (showSendToAnotherOmaIdDialog) {
-                    SendToAnotherOmaIdDialog(
-                        onDismiss = { showSendToAnotherOmaIdDialog = false },
-                        onConfirmSend = { targetOmaId, optionalIp, optionalPort ->
-                            showSendToAnotherOmaIdDialog = false
-                            val targetPeer = app.discoveryManager.resolveOrCreatePeerForOmaId(
-                                targetOmaId = targetOmaId,
-                                fallbackIp = optionalIp,
-                                fallbackPort = optionalPort
-                            )
-                            if (targetPeer != null && targetPeer.ip.isNotBlank()) {
-                                scope.launch {
-                                    handleSendToPeer(app, targetPeer, sharedUris, sharedText) { state ->
-                                        transferState = state
-                                    }
-                                }
-                            } else {
-                                Toast.makeText(
-                                    this@ShareActivity,
-                                    "Hedef OmaID ($targetOmaId) için çevrimiçi IP bulunamadı; IP adresini de girerek tekrar deneyebilirsiniz.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
+                            sendTo(TransferBridge.createManualPeer(ip, port))
                         }
                     )
                 }
@@ -329,14 +229,17 @@ class ShareActivity : ComponentActivity() {
             sendMultipleUrisToPeer(this, app, peer, uris, onState)
         } else if (!text.isNullOrEmpty()) {
             withContext(Dispatchers.IO) {
-                val res = app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
+                // QR-paired devices: encrypted QUIC only. Others: legacy HTTP.
+                val key = CoreNode.trustedKeyFor(this@ShareActivity, peer)
+                val res = if (key != null) CoreNode.sendClipboard(key, text, peer.ip)
+                else app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
                 withContext(Dispatchers.Main) {
                     if (res.isSuccess) {
                         app.soundEngine.playSendSound()
                         app.hapticController.onDropBounce()
-                        onState(TransferProgressState.Success("Metin '${peer.name}' cihazına gönderildi"))
+                        onState(TransferProgressState.Success(OmaI18n.f("clipboard_sent", peer.name)))
                     } else {
-                        onState(TransferProgressState.Error(res.exceptionOrNull()?.message ?: "Metin gönderilemedi"))
+                        onState(TransferProgressState.Error(res.exceptionOrNull()?.message ?: OmaI18n.t("err_transfer_failed")))
                     }
                 }
             }

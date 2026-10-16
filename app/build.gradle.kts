@@ -10,13 +10,13 @@ plugins {
 
 android {
     namespace = "io.omarchy.omasend"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "io.omarchy.omasend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 57
-        versionName = "1.8.6"
+        versionCode = 58
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

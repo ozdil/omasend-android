@@ -12,7 +12,9 @@ data class P2pBeaconPacket(
     val port: Int = 53317,
     val mode: String = "ALL",
     val oma_id: String = "",
-    val fp: String = ""
+    val fp: String = "",
+    /** Ed25519 device key (protocol v2). Address hint only: QUIC/TLS verifies the key. */
+    val pk: String = ""
 )
 
 data class DiscoveredPeer(
@@ -25,7 +27,9 @@ data class DiscoveredPeer(
     val fingerprint: String = "",
     val isTrusted: Boolean = false,
     val isSameOwner: Boolean = false,
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeen: Long = System.currentTimeMillis(),
+    /** Device key advertised in the beacon (protocol v2), empty for older versions. */
+    val pk: String = ""
 )
 
 @Serializable

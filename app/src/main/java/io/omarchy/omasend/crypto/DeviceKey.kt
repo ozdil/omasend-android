@@ -172,6 +172,9 @@ object DeviceKey {
         val last_seen: Long = 0
     )
 
+    /** Bumped on every trust-store change so the UI can refresh its device list. */
+    val trustVersion = kotlinx.coroutines.flow.MutableStateFlow(0)
+
     class TrustStore(context: Context) {
         private val prefs = context.applicationContext.getSharedPreferences("omasend_trusted_keys_v2", Context.MODE_PRIVATE)
         private val ser = ListSerializer(TrustedKey.serializer())
@@ -182,6 +185,7 @@ object DeviceKey {
 
         @Synchronized private fun save(keys: List<TrustedKey>) {
             prefs.edit().putString("keys", json.encodeToString(ser, keys)).apply()
+            trustVersion.value = trustVersion.value + 1
         }
 
         fun get(pk: String): TrustedKey? = load().firstOrNull { it.pk == pk }

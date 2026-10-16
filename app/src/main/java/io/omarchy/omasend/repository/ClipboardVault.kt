@@ -397,31 +397,29 @@ class ClipboardVault private constructor(private val context: Context) {
             val deviceName = NetworkUtils.getDeviceName(context)
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 
-            // V2-SEC-02 interim fix: isSameOwner/isTrusted come from unauthenticated beacons and can be
-            // spoofed to exfiltrate the clipboard. Push only to paired OmaIDs, and only at the IP stored
-            // when the user paired them (beacons can no longer change that IP).
+            // Automatic clipboard sync:
+            //  - the user's OWN QR-paired devices, over encrypted QUIC only (never downgraded);
+            //  - legacy code-paired OmaIDs at the IP stored when they were paired (HTTP, as before),
+            //    unless that peer is a QR-paired device.
+            // Devices paired as someone else's never receive automatic pushes. Beacons are
+            // unauthenticated, so beacon-derived "same owner" never authorizes a push.
+            val keys = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load()
+            val ownKeys = keys.filter { it.own_device }
             val peers = app.discoveryManager.peers.value
-            val authorizedPeers = peers.filter { peer ->
+            val legacyPeers = peers.filter { peer ->
                 peer.omaId.isNotBlank() &&
-                    app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true
+                    app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true &&
+                    io.omarchy.omasend.network.CoreNode.keyFor(keys, peer) == null
             }.distinctBy { it.ip }
-            // Phase 1: QR-paired devices (verified keys) at the IP of their last signed request.
-            val keyTargets = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load()
-                .filter { it.ip.isNotBlank() && authorizedPeers.none { p -> p.ip == it.ip } }
-            if (authorizedPeers.isNotEmpty() || keyTargets.isNotEmpty()) {
+            if (legacyPeers.isNotEmpty() || ownKeys.isNotEmpty()) {
                 scope.launch {
-                    for (peer in authorizedPeers) {
+                    for (k in ownKeys) {
+                        io.omarchy.omasend.network.CoreNode.sendClipboard(k, text)
+                    }
+                    for (peer in legacyPeers) {
                         if (peer.transport == "BT" || peer.ip.startsWith("bt:") || peer.port <= 0) continue
                         try {
                             app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
-                        } catch (_: Exception) {}
-                    }
-                    for (k in keyTargets) {
-                        try {
-                            // Encrypted QUIC first; legacy signed HTTP if the peer has no core endpoint.
-                            if (!io.omarchy.omasend.network.CoreNode.sendClipboard(context, k, text)) {
-                                app.client.sendClipboard(k.ip, if (k.port > 0) k.port else NetworkUtils.PORT, text, "")
-                            }
                         } catch (_: Exception) {}
                     }
                 }

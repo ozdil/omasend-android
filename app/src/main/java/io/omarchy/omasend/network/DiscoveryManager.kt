@@ -380,6 +380,12 @@ class DiscoveryManager(private val context: Context) {
         }
     }
 
+    private fun myPk(): String = try {
+        io.omarchy.omasend.crypto.DeviceKey.identity(context).publicB64
+    } catch (_: Exception) {
+        ""
+    }
+
     private fun getMyOmaId(): String {
         return try {
             val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
@@ -406,7 +412,8 @@ class DiscoveryManager(private val context: Context) {
                         port = NetworkUtils.PORT,
                         mode = _discoveryMode.value.wireMode,
                         oma_id = myOmaId,
-                        fp = myOmaId
+                        fp = myOmaId,
+                        pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
                     repeat(3) {
@@ -536,7 +543,8 @@ class DiscoveryManager(private val context: Context) {
                         port = NetworkUtils.PORT,
                         mode = "OFF",
                         oma_id = myOmaId,
-                        fp = myOmaId
+                        fp = myOmaId,
+                        pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
                     repeat(2) {
@@ -695,7 +703,8 @@ class DiscoveryManager(private val context: Context) {
                                         fingerprint = formattedPeerOma,
                                         isTrusted = isTrustedPeer,
                                         isSameOwner = isSameOwner,
-                                        lastSeen = System.currentTimeMillis()
+                                        lastSeen = System.currentTimeMillis(),
+                                        pk = beacon.pk.takeIf { io.omarchy.omasend.crypto.DeviceKey.decodePk(it) != null } ?: ""
                                     )
                                     peerMap[peer.id] = peer
                                     markActiveEvent()
@@ -739,7 +748,8 @@ class DiscoveryManager(private val context: Context) {
                             port = NetworkUtils.PORT,
                             mode = _discoveryMode.value.wireMode,
                             oma_id = myOmaId,
-                            fp = myOmaId
+                            fp = myOmaId,
+                            pk = myPk()
                         )
                         val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
 
