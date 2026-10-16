@@ -13,6 +13,8 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
@@ -177,7 +179,19 @@ fun OmaQrScannerDialog(
                                 it.surfaceProvider = previewView.surfaceProvider
                             }
 
+                            // The default 640x480 analysis frame is too coarse for the dense
+                            // pairing QR unless the phone is held very close to the screen.
                             val imageAnalysis = ImageAnalysis.Builder()
+                                .setResolutionSelector(
+                                    ResolutionSelector.Builder()
+                                        .setResolutionStrategy(
+                                            ResolutionStrategy(
+                                                android.util.Size(1280, 720),
+                                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                            )
+                                        )
+                                        .build()
+                                )
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                                 .build()
                                 .also {

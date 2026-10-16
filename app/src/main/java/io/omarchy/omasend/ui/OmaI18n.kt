@@ -69,6 +69,7 @@ object OmaI18n {
         "pair_intro" to mapOf("tr" to "Masaüstünde: OmaSend panelindeki QR simgesine tıkla, sonra burada tara. İki telefon arasında: birinde 'QR kodumu göster'i aç, diğeriyle tara.", "en" to "On a desktop: click the QR icon in the OmaSend panel, then scan it here. Between two phones: open 'Show my QR code' on one and scan it with the other."),
         "paired_footnote" to mapOf("tr" to "Uçtan uca şifreli. Kendi cihazlarından gelenler otomatik kabul edilir; panon yalnızca kendi cihazlarınla eşitlenir.", "en" to "End-to-end encrypted. Transfers from your own devices are accepted automatically; your clipboard only syncs with your own devices."),
         "paired_with" to mapOf("tr" to "Eşleşti: %s", "en" to "Paired with %s"),
+        "pairing_in_progress" to mapOf("tr" to "QR okundu, eşleştiriliyor…", "en" to "QR code read, pairing…"),
         "qr_validity" to mapOf("tr" to "5 dakika geçerli, tek kullanımlık. Diğer cihazda OmaSend ile tara.", "en" to "Valid for 5 minutes, single use. Scan it with OmaSend on the other device."),
         "refresh" to mapOf("tr" to "Yenile", "en" to "Refresh"),
         "scan_paused" to mapOf("tr" to "Tarama kapalı.", "en" to "Scanning is off."),
