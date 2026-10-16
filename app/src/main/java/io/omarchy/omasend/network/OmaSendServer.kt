@@ -50,7 +50,6 @@ class OmaSendServer(private val context: Context) {
 
     // Protocol v2 (Phase 1): QR-paired Ed25519 device keys.
     private val trustStore by lazy { DeviceKey.TrustStore(context) }
-    private val deviceIdentity by lazy { DeviceKey.identity(context) }
     var onDevicePaired: ((String) -> Unit)? = null
 
     private fun v2Verify(headers: Map<String, String>, method: String, pathAndQuery: String, bodyTag: String, peerIp: String) =
@@ -582,6 +581,11 @@ class OmaSendServer(private val context: Context) {
             json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
         } catch (_: Exception) {
             sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        val deviceIdentity = DeviceKey.identityOrNull(context)
+        if (deviceIdentity == null) {
+            sendResponse(output, 503, "Service Unavailable", "application/json", "{\"error\":\"Device key unavailable on this device\"}")
             return
         }
         DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT)

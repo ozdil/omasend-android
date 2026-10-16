@@ -101,22 +101,116 @@ object DeviceKey {
         return cachedSeed!!.copyOf()
     }
 
-    /** Seed is stored in app-private storage, wrapped with a non-exportable Android Keystore AES key. */
+    /**
+     * The stored device key exists but cannot be read right now (Keystore error, corrupt blob).
+     * Callers must treat this as "v2 identity unavailable" and keep working on the legacy path;
+     * the key is never replaced automatically because that would silently break every pairing.
+     */
+    class DeviceKeyUnavailableException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+
+    private const val ENC_FILE = "device_ed25519.key.enc"
+    private const val PLAIN_FILE = "device_ed25519.key"
+    private const val UNWRAP_RETRY_DELAY_MS = 300L
+
+    /** Non-throwing variant for callers that can fall back to the legacy (unsigned) path. */
+    fun identityOrNull(context: Context): Identity? = try {
+        identity(context)
+    } catch (_: DeviceKeyUnavailableException) {
+        null
+    }
+
+    /**
+     * Seed is stored in app-private storage, wrapped with a non-exportable Android Keystore AES key.
+     *
+     * A new seed is generated ONLY when no key file exists at all. If the wrapped key exists but
+     * cannot be unwrapped, the unwrap is retried once and then [DeviceKeyUnavailableException] is
+     * thrown; the file is left untouched so a transient Keystore failure does not destroy the
+     * identity (and with it every QR pairing on both sides). Nothing is cached on failure, so the
+     * next call tries again. Blocking (Keystore + disk): call off the main thread when possible.
+     */
     fun identity(context: Context): Identity {
         cachedIdentity?.let { return it }
         synchronized(this) {
             cachedIdentity?.let { return it }
-            val file = File(context.filesDir, "device_ed25519.key.enc")
+            val file = File(context.filesDir, ENC_FILE)
             // Fallback for devices whose Keystore is unusable: app-private plain seed file.
-            val plain = File(context.filesDir, "device_ed25519.key")
-            val seed = (if (file.exists()) unwrap(file.readBytes()) else null)
-                ?: (if (plain.exists()) plain.readBytes().takeIf { it.size == 32 } else null)
-                ?: randomBytes(32).also { s ->
-                    val wrapped = wrap(s)
-                    if (wrapped != null) file.writeBytes(wrapped) else plain.writeBytes(s)
+            val plain = File(context.filesDir, PLAIN_FILE)
+            val seed = when {
+                file.exists() -> loadWrappedSeed(file)
+                plain.exists() -> plain.readBytes().takeIf { it.size == 32 } ?: run {
+                    // A truncated plain seed cannot be recovered; keep it for forensics and start over.
+                    backup(plain, "corrupt")
+                    generateAndStoreSeed(file, plain)
                 }
+                else -> generateAndStoreSeed(file, plain)
+            }
             cachedSeed = seed.copyOf()
             return Identity(seed).also { cachedIdentity = it }
+        }
+    }
+
+    /**
+     * Explicit user action only (e.g. "Reset device key" after [DeviceKeyUnavailableException]
+     * persists): archives the current key files as backups and creates a new identity. Existing
+     * QR pairings stop working and must be redone. The running transport keeps the old key until
+     * the app restarts.
+     */
+    fun resetIdentity(context: Context): Identity {
+        synchronized(this) {
+            val file = File(context.filesDir, ENC_FILE)
+            val plain = File(context.filesDir, PLAIN_FILE)
+            backup(file, "reset")
+            backup(plain, "reset")
+            file.delete()
+            plain.delete()
+            cachedIdentity = null
+            cachedSeed = null
+            return identity(context)
+        }
+    }
+
+    private fun loadWrappedSeed(file: File): ByteArray {
+        var lastError: Throwable? = null
+        repeat(2) { attempt ->
+            if (attempt > 0) {
+                try { Thread.sleep(UNWRAP_RETRY_DELAY_MS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+            }
+            try {
+                return unwrapChecked(file.readBytes())
+            } catch (t: Exception) {
+                lastError = t
+            }
+        }
+        throw DeviceKeyUnavailableException(
+            "Device key ${file.name} exists but could not be unlocked with the Android Keystore " +
+                "(${lastError?.javaClass?.simpleName}: ${lastError?.message}). It was not replaced.",
+            lastError
+        )
+    }
+
+    private fun generateAndStoreSeed(file: File, plain: File): ByteArray {
+        val s = randomBytes(32)
+        val wrapped = wrap(s)
+        if (wrapped != null) writeAtomically(file, wrapped) else writeAtomically(plain, s)
+        return s
+    }
+
+    /** Copies [f] next to itself before it is replaced or abandoned; never overwrites a backup. */
+    private fun backup(f: File, tag: String) {
+        if (!f.exists()) return
+        try {
+            f.copyTo(File(f.parentFile, "${f.name}.$tag-${System.currentTimeMillis()}.bak"), overwrite = false)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun writeAtomically(target: File, bytes: ByteArray) {
+        backup(target, "prev")
+        val tmp = File(target.parentFile, "${target.name}.tmp")
+        tmp.writeBytes(bytes)
+        if (!tmp.renameTo(target)) {
+            target.writeBytes(bytes)
+            tmp.delete()
         }
     }
 
@@ -147,13 +241,14 @@ object DeviceKey {
         return c.iv + c.doFinal(seed)
     }
 
-    private fun unwrap(blob: ByteArray): ByteArray? = try {
-        val key = wrapKey() ?: return null
+    private fun unwrapChecked(blob: ByteArray): ByteArray {
+        require(blob.size > 12) { "Wrapped device key is truncated (${blob.size} bytes)" }
+        val key = wrapKey() ?: throw IllegalStateException("Android Keystore wrapping key is unavailable")
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12)))
-        c.doFinal(blob.copyOfRange(12, blob.size)).takeIf { it.size == 32 }
-    } catch (_: Exception) {
-        null
+        val seed = c.doFinal(blob.copyOfRange(12, blob.size))
+        require(seed.size == 32) { "Unwrapped device key has the wrong length" }
+        return seed
     }
 
     // ------------------------------------------------------------- trusted keys

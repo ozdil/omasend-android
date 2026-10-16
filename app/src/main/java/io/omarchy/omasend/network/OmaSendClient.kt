@@ -68,9 +68,16 @@ class OmaSendClient(private val context: Context) {
             body?.writeTo(buf)
             DeviceKey.bodyTagJson(buf.readByteArray())
         }
-        val signed = req.newBuilder()
-        DeviceKey.authHeaders(DeviceKey.identity(context), req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
-        chain.proceed(signed.build())
+        // If the device key is temporarily unreadable, send unsigned: the receiver applies the
+        // legacy rules, which is what this HTTP path is for anyway (paired devices use QUIC).
+        val id = DeviceKey.identityOrNull(context)
+        if (id == null) {
+            chain.proceed(req)
+        } else {
+            val signed = req.newBuilder()
+            DeviceKey.authHeaders(id, req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
+            chain.proceed(signed.build())
+        }
     }
 
     private val client = OkHttpClient.Builder()
