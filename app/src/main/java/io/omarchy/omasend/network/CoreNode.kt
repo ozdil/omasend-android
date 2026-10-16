@@ -206,6 +206,10 @@ object CoreNode {
      * Sends content URIs to a discovered peer. Returns false only when the peer is NOT a
      * QR-paired device (the caller then uses the legacy HTTP path). For paired devices the
      * outcome is always reported through [onState] and true is returned.
+     *
+     * Every outgoing send (QUIC and the HTTP fallback) goes through here first, so this is also
+     * where [UriGuard] rejects `file:` URIs and URIs of OmaSend's own providers: the batch is
+     * refused, reported as an error and true is returned so no fallback runs.
      */
     suspend fun trySendUris(
         context: Context,
@@ -214,8 +218,22 @@ object CoreNode {
         uris: List<Uri>,
         onState: (TransferProgressState) -> Unit
     ): Boolean {
+        if (rejectUnsafeUris(context, uris, onState)) return true
         val key = trustedKeyFor(context, peer) ?: return false
         sendUris(context, app, key, uris, peer.ip, onState)
+        return true
+    }
+
+    /** True (and an error reported) when any URI must not be sent; see [UriGuard]. */
+    private suspend fun rejectUnsafeUris(
+        context: Context,
+        uris: List<Uri>,
+        onState: (TransferProgressState) -> Unit
+    ): Boolean {
+        val rejected = UriGuard.rejected(context, uris)
+        if (rejected.isEmpty()) return false
+        Log.w(TAG, "refusing to send ${rejected.size} URI(s) from a file: scheme or OmaSend's own provider: $rejected")
+        withContext(Dispatchers.Main) { onState(TransferProgressState.Error(UriGuard.REJECTED_MESSAGE)) }
         return true
     }
 
@@ -227,6 +245,7 @@ object CoreNode {
         extraIp: String?,
         onState: (TransferProgressState) -> Unit
     ) = withContext(Dispatchers.IO) {
+        if (rejectUnsafeUris(context, uris, onState)) return@withContext
         val n = awaitNode()
         if (n == null) {
             withContext(Dispatchers.Main) { onState(TransferProgressState.Error(OmaI18n.t("err_core_not_running"))) }
