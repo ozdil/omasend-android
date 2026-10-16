@@ -36,17 +36,8 @@ class OmaSendServer(private val context: Context) {
         ignoreUnknownKeys = true
     }
 
-    // Token -> PendingTransfer
-    data class PendingState(
-        val prompt: IncomingTransferPrompt,
-        val expiresAt: Long,
-        var status: String, // "PENDING", "ACCEPTED", "REJECTED"
-        val remainingFiles: AtomicInteger = AtomicInteger(prompt.files.size.coerceAtLeast(1)),
-        /** v2: key of the verified sender; uploads must be signed by the same key. */
-        val senderPk: String? = null
-    )
-
-    private val pendingTransfers = ConcurrentHashMap<String, PendingState>()
+    // Token -> legacy HTTP transfer (A7/A8/A9: lifetime, approved-file binding, caps)
+    private val pendingTransfers = PendingTransferRegistry()
 
     // Protocol v2 (Phase 1): QR-paired Ed25519 device keys.
     private val trustStore by lazy { DeviceKey.TrustStore(context) }
@@ -150,8 +141,7 @@ class OmaSendServer(private val context: Context) {
             CoreNode.respond(token, true)
             return
         }
-        val state = pendingTransfers[token] ?: return
-        state.status = "ACCEPTED"
+        val state = pendingTransfers.accept(token) ?: return
         addTrustedPeer(state.prompt.senderId)
     }
 
@@ -160,7 +150,7 @@ class OmaSendServer(private val context: Context) {
             CoreNode.respond(token, false)
             return
         }
-        pendingTransfers[token]?.status = "REJECTED"
+        pendingTransfers.reject(token)
     }
 
     fun start() {
@@ -333,7 +323,7 @@ class OmaSendServer(private val context: Context) {
             val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
             val headerOmaId = headers["x-omasend-omaid"] ?: getQueryParam(query, "oma_id").ifBlank { null }
             val queryToken = getQueryParam(query, "token").ifBlank { null }
-            val hasValidActiveToken = queryToken != null && pendingTransfers.containsKey(queryToken)
+            val hasValidActiveToken = queryToken != null && pendingTransfers.isActive(queryToken)
 
             if (!isPrivatePeer && !isPairedOrKnownOmaId(headerOmaId) && !hasValidActiveToken &&
                 method != "POST" // POST /api/p2p/request and /api/p2p/clipboard may carry oma_id inside JSON body
@@ -456,22 +446,38 @@ class OmaSendServer(private val context: Context) {
             // Phase 1: only a cryptographically verified key that was QR-paired as "own device"
             // may auto-accept. A claimed OmaID never does.
             if (verifiedKey != null && verifiedKey.own_device) {
-                pendingTransfers[token] = PendingState(
-                    prompt = prompt,
-                    expiresAt = System.currentTimeMillis() + 600000L,
-                    status = "ACCEPTED",
-                    senderPk = verifiedKey.pk
+                val added = pendingTransfers.add(
+                    token,
+                    PendingTransferRegistry.Entry(
+                        prompt = prompt,
+                        sourceIp = peerIp,
+                        status = PendingTransferRegistry.STATUS_ACCEPTED,
+                        expiresAt = System.currentTimeMillis() + PendingTransferRegistry.ACCEPTED_TTL_MS,
+                        senderPk = verifiedKey.pk
+                    )
                 )
+                if (added != PendingTransferRegistry.AddResult.Added) {
+                    sendTooManyPending(output)
+                    return
+                }
                 sendResponse(output, 200, "OK", "application/json", """{"status":"ACCEPTED","token":"$token","verified_device":true}""")
                 return
             }
 
-            pendingTransfers[token] = PendingState(
-                prompt = prompt,
-                expiresAt = System.currentTimeMillis() + 30000L,
-                status = "PENDING",
-                senderPk = verifiedKey?.pk
+            val added = pendingTransfers.add(
+                token,
+                PendingTransferRegistry.Entry(
+                    prompt = prompt,
+                    sourceIp = peerIp,
+                    status = PendingTransferRegistry.STATUS_PENDING,
+                    expiresAt = System.currentTimeMillis() + PendingTransferRegistry.PENDING_TTL_MS,
+                    senderPk = verifiedKey?.pk
+                )
             )
+            if (added != PendingTransferRegistry.AddResult.Added) {
+                sendTooManyPending(output)
+                return
+            }
 
             Handler(Looper.getMainLooper()).post {
                 onIncomingTransferPrompt?.invoke(prompt)
@@ -484,15 +490,19 @@ class OmaSendServer(private val context: Context) {
         }
     }
 
+    private fun sendTooManyPending(output: OutputStream) {
+        sendResponse(output, 429, "Too Many Requests", "application/json", "{\"error\":\"Too many pending transfer requests\"}")
+    }
+
     private fun handleDecisionQuery(output: OutputStream, query: String) {
         val token = getQueryParam(query, "token")
-        val state = pendingTransfers[token]
+        val state = pendingTransfers.get(token)
         if (state == null) {
             sendResponse(output, 404, "Not Found", "application/json", "{\"status\":\"NOT_FOUND\"}")
             return
         }
 
-        if (System.currentTimeMillis() > state.expiresAt) {
+        if (pendingTransfers.isExpired(state)) {
             pendingTransfers.remove(token)
             sendResponse(output, 200, "OK", "application/json", "{\"status\":\"EXPIRED\"}")
             return
@@ -525,8 +535,8 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        val state = pendingTransfers[token]
-        if (state == null || state.status != "ACCEPTED" || System.currentTimeMillis() > state.expiresAt) {
+        val state = pendingTransfers.get(token)
+        if (state == null || state.status != PendingTransferRegistry.STATUS_ACCEPTED || pendingTransfers.isExpired(state)) {
             sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized or expired transfer\"}")
             return
         }
@@ -539,29 +549,43 @@ class OmaSendServer(private val context: Context) {
             }
         }
 
+        // A8: the upload must be one of the files the user approved (name and size), not yet received.
+        val fileIndex = state.claim(filename, contentLength)
+        if (fileIndex < 0) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"File is not part of the approved transfer\"}")
+            return
+        }
+
         // Extend token expiration while active upload is in progress for multi-file batches
         val uploadDurationMs = 60000L + ((contentLength / (256 * 1024L)) * 1000L).coerceAtLeast(30000L)
         val uploadDeadline = System.currentTimeMillis() + uploadDurationMs
-        pendingTransfers[token] = state.copy(expiresAt = uploadDeadline + 30000L)
+        pendingTransfers.refresh(state, uploadDeadline + 30000L)
 
         // Configure socket timeout for active continuous streaming (30 seconds per I/O chunk)
         try {
             socket.soTimeout = 30000
         } catch (_: Exception) {}
 
-        val (saved, finalName) = NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
-            StorageUtils.saveIncomingStream(
-                context = context,
-                filename = filename,
-                inputStream = input,
-                totalBytes = contentLength,
-                deadlineMs = uploadDeadline
-            )
+        val (saved, finalName) = try {
+            NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
+                StorageUtils.saveIncomingStream(
+                    context = context,
+                    filename = filename,
+                    inputStream = input,
+                    totalBytes = contentLength,
+                    deadlineMs = uploadDeadline
+                )
+            }
+        } catch (t: Throwable) {
+            state.release(fileIndex)
+            throw t
         }
 
         if (saved) {
-            if (state.remainingFiles.decrementAndGet() <= 0) {
+            if (state.complete(fileIndex)) {
                 pendingTransfers.remove(token)
+            } else {
+                pendingTransfers.refresh(state, System.currentTimeMillis())
             }
             val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
             Handler(Looper.getMainLooper()).post {
@@ -574,6 +598,7 @@ class OmaSendServer(private val context: Context) {
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)
         } else {
+            state.release(fileIndex)
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
         }
     }
@@ -692,8 +717,8 @@ class OmaSendServer(private val context: Context) {
         val isKeyValid = !providedKey.isNullOrBlank() && providedKey == expectedSessionKey
 
         val isTokenValid = !providedKey.isNullOrBlank() &&
-            pendingTransfers[providedKey]?.status == "ACCEPTED" &&
-            System.currentTimeMillis() <= (pendingTransfers[providedKey]?.expiresAt ?: 0L)
+            pendingTransfers.get(providedKey)?.status == PendingTransferRegistry.STATUS_ACCEPTED &&
+            pendingTransfers.isActive(providedKey)
 
         // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
         // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
