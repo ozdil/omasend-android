@@ -47,6 +47,7 @@ class OmaSendApp : Application() {
         instance = this
 
         createNotificationChannels()
+        io.omarchy.omasend.network.NetworkUtils.init(this)
 
         soundEngine = OmaSoundEngine(this)
         hapticController = OmaHapticController(this)
