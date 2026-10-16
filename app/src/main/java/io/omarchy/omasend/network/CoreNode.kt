@@ -1,14 +1,20 @@
 package io.omarchy.omasend.network
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.model.DiscoveredPeer
@@ -292,6 +298,28 @@ object CoreNode {
         }
     }
 
+    /** Tells the user a received file could not be moved to Downloads and where it was kept. */
+    private fun notifySaveFailed(app: OmaSendApp, file: File, reason: String?) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) return
+            val text = "${file.name} could not be saved to Downloads" +
+                (if (reason.isNullOrBlank()) "" else " ($reason)") +
+                ". It was kept in the app's storage: ${file.absolutePath}"
+            val notification = NotificationCompat.Builder(app, OmaSendApp.CHANNEL_TRANSFERS)
+                .setSmallIcon(android.R.drawable.stat_notify_error)
+                .setContentTitle("OmaSend: file not saved")
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .build()
+            NotificationManagerCompat.from(app).notify(SAVE_FAILED_NOTIFICATION_BASE + (file.absolutePath.hashCode() and 0xFFFF), notification)
+        }
+    }
+
+    private const val SAVE_FAILED_NOTIFICATION_BASE = 0x4F000
+
     private class Callbacks(private val app: OmaSendApp) : NodeCallbacks {
         private val store by lazy { DeviceKey.TrustStore(app) }
 
@@ -321,23 +349,33 @@ object CoreNode {
 
         override fun fileReceived(transferId: String, peerPk: String, path: String) {
             val f = File(path)
+            var saved = false
             try {
                 // Move the verified file from app storage into Downloads/OmaSend (MediaStore).
-                val (saved, finalName) = f.inputStream().use {
+                val (ok, finalNameOrError) = f.inputStream().use {
                     StorageUtils.saveIncomingStream(app, f.name, it, f.length())
                 }
-                if (saved) {
+                saved = ok
+                if (ok) {
                     val size = f.length()
                     main.post {
                         runCatching {
                             app.soundEngine.playReceiveSound()
                             app.hapticController.onFileReceivedImpact()
                         }
-                        app.server.onFileReceived?.invoke(finalName, size)
+                        app.server.onFileReceived?.invoke(finalNameOrError, size)
                     }
+                } else {
+                    Log.w(TAG, "could not save ${f.name} to Downloads ($finalNameOrError); kept at ${f.absolutePath}")
+                    notifySaveFailed(app, f, finalNameOrError)
                 }
+            } catch (t: Throwable) {
+                Log.w(TAG, "could not save ${f.name} to Downloads; kept at ${f.absolutePath}", t)
+                notifySaveFailed(app, f, t.message)
             } finally {
-                f.delete()
+                // The received, BLAKE3-verified file is the only copy: delete it only once it is
+                // safely in Downloads. On failure it stays in the app's incoming directory.
+                if (saved) f.delete()
             }
         }
 
