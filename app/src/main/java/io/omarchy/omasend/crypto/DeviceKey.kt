@@ -188,6 +188,17 @@ object DeviceKey {
         )
     }
 
+    /** Like [unwrap], but reports why the wrapped seed could not be read. */
+    private fun unwrapChecked(blob: ByteArray): ByteArray {
+        require(blob.size > 12) { "Wrapped device key is truncated (${blob.size} bytes)" }
+        val key = wrapKey() ?: throw IllegalStateException("Android Keystore wrapping key is unavailable")
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12)))
+        val seed = c.doFinal(blob.copyOfRange(12, blob.size))
+        require(seed.size == 32) { "Unwrapped device key has the wrong length" }
+        return seed
+    }
+
     private fun generateAndStoreSeed(file: File, plain: File): ByteArray {
         val s = randomBytes(32)
         val wrapped = wrap(s)
@@ -234,21 +245,23 @@ object DeviceKey {
         null
     }
 
-    private fun wrap(seed: ByteArray): ByteArray? {
+    /** Encrypts a small secret with the Keystore wrapping key (null if the Keystore is unusable). */
+    internal fun wrap(seed: ByteArray): ByteArray? {
         val key = wrapKey() ?: return null
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, key)
         return c.iv + c.doFinal(seed)
     }
 
-    private fun unwrapChecked(blob: ByteArray): ByteArray {
-        require(blob.size > 12) { "Wrapped device key is truncated (${blob.size} bytes)" }
-        val key = wrapKey() ?: throw IllegalStateException("Android Keystore wrapping key is unavailable")
+    private fun unwrap(blob: ByteArray): ByteArray? = unwrapSecret(blob)?.takeIf { it.size == 32 }
+
+    internal fun unwrapSecret(blob: ByteArray): ByteArray? = try {
+        val key = wrapKey() ?: return null
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12)))
-        val seed = c.doFinal(blob.copyOfRange(12, blob.size))
-        require(seed.size == 32) { "Unwrapped device key has the wrong length" }
-        return seed
+        c.doFinal(blob.copyOfRange(12, blob.size))
+    } catch (_: Exception) {
+        null
     }
 
     // ------------------------------------------------------------- trusted keys
