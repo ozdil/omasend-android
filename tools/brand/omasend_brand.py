@@ -268,7 +268,7 @@ def lock(fg,ac,wa,wb,bg):
     for i,(ch,x) in enumerate(parts):
         s+=f'<path fill="{wa if i<3 else wb}" d="{grid_rects(L[ch],mh+gap+x*cell,0,cell)}"/>'
     return s+'</svg>'
-w('omasend-lockup-dark.svg',lock(G,BL,FG,G,BG)); w('omasend-lockup-light.svg',lock(INK,'#2e7de9',INK,'#587539',LIGHT))
+w('omasend-lockup-dark.svg',lock(G,BL,FG,G,None)); w('omasend-lockup-light.svg',lock(INK,'#2e7de9',INK,'#587539',None))
 # feature graphic 1024x500
 lk=lock(G,BL,FG,G,None)
 fg=(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500"><rect width="1024" height="500" fill="{BG}"/>'
