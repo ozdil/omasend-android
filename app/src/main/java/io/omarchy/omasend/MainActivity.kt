@@ -18,7 +18,8 @@ import androidx.core.content.ContextCompat
 import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.network.NetworkUtils
 import io.omarchy.omasend.service.OmaSendForegroundService
-import io.omarchy.omasend.ui.RadarScreen
+import io.omarchy.omasend.ui.OmaI18n
+import io.omarchy.omasend.ui.OmaSendRoot
 import io.omarchy.omasend.ui.theme.OmaSendTheme
 
 class MainActivity : ComponentActivity() {
@@ -60,30 +61,30 @@ class MainActivity : ComponentActivity() {
         app.server.onFileReceived = { filename, size ->
             Toast.makeText(
                 this,
-                "Received '$filename' (${NetworkUtils.formatBytes(size)}) saved to Downloads/OmaSend",
+                OmaI18n.f("file_received", filename, NetworkUtils.formatBytes(size)),
                 Toast.LENGTH_LONG
             ).show()
         }
 
         app.server.onClipboardReceived = { senderName, _ ->
-            Toast.makeText(this, "Clipboard received from $senderName", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, OmaI18n.f("clipboard_received", senderName), Toast.LENGTH_SHORT).show()
         }
 
         setContent {
             OmaSendTheme {
-                RadarScreen(
+                OmaSendRoot(
                     app = app,
                     incomingPrompt = incomingPrompt,
                     onAcceptPrompt = { token ->
                         app.soundEngine.playReceiveSound()
                         app.server.acceptTransfer(token)
                         incomingPrompt = null
-                        Toast.makeText(this, "Transfer accepted. Receiving...", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, OmaI18n.t("transfer_accepted"), Toast.LENGTH_SHORT).show()
                     },
                     onDeclinePrompt = { token ->
                         app.server.rejectTransfer(token)
                         incomingPrompt = null
-                        Toast.makeText(this, "Transfer declined", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, OmaI18n.t("transfer_declined"), Toast.LENGTH_SHORT).show()
                     }
                 )
             }

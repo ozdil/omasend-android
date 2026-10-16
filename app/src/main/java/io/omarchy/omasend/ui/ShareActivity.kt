@@ -14,12 +14,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Close
@@ -29,9 +29,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.collectAsState
@@ -44,14 +44,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.omarchy.omasend.OmaSendApp
-import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.network.CoreNode
 import io.omarchy.omasend.model.DiscoveredPeer
 import io.omarchy.omasend.model.TransferProgressState
 import io.omarchy.omasend.network.TransferBridge
-import io.omarchy.omasend.ui.theme.JetBrainsMonoFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -84,32 +81,21 @@ class ShareActivity : ComponentActivity() {
                     topBar = {
                         TopAppBar(
                             title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OmarchyGeometricEmblem(modifier = Modifier.size(32.dp))
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = OmaI18n.t("share_title"),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 18.sp
-                                        )
-                                        Text(
-                                            text = if (sharedUris.isNotEmpty()) OmaI18n.f("n_files", sharedUris.size) else OmaI18n.t("text_content"),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontSize = 12.sp
-                                        )
-                                    }
+                                Column {
+                                    Text(OmaI18n.t("share_title"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = if (sharedUris.isNotEmpty()) OmaI18n.f("n_files", sharedUris.size) else OmaI18n.t("text_content"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             },
-                            actions = {
+                            navigationIcon = {
                                 IconButton(onClick = { finish() }) {
-                                    Icon(Icons.Default.Close, contentDescription = OmaI18n.t("close"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Icon(Icons.Default.Close, contentDescription = OmaI18n.t("close"))
                                 }
                             },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
                         )
                     },
                     containerColor = MaterialTheme.colorScheme.background
@@ -118,7 +104,8 @@ class ShareActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .padding(16.dp)
+                            .padding(horizontal = 16.dp)
+                            .navigationBarsPadding()
                     ) {
                         if (transferState !is TransferProgressState.Idle) {
                             TransferStatusCard(
@@ -130,7 +117,7 @@ class ShareActivity : ComponentActivity() {
                             ) {
                                 if (transferState is TransferProgressState.Success) finish() else transferState = TransferProgressState.Idle
                             }
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
 
                         if (lists.paired.isEmpty() && lists.nearby.isEmpty()) {
@@ -139,67 +126,46 @@ class ShareActivity : ComponentActivity() {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                CircularProgressIndicator()
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text(text = OmaI18n.t("searching_devices"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(OmaI18n.t("searching_devices"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         } else {
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth().weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 if (lists.paired.isNotEmpty()) {
-                                    item {
-                                        SectionHeaderRow(title = OmaI18n.t("section_my_devices"), count = lists.paired.size, accentColor = Emerald)
-                                    }
+                                    item { SectionLabel(OmaI18n.t("section_my_devices")) }
                                     items(lists.paired, key = { "share_k_${it.key.pk}" }) { d ->
-                                        val handle = d.asPeer()
-                                        PairedDeviceCard(
-                                            device = d,
-                                            selected = false,
-                                            onSelect = { sendTo(handle) },
-                                            onSend = { sendTo(handle) },
-                                            onClipboard = { sendTo(handle) },
-                                            onRemove = { DeviceKey.TrustStore(this@ShareActivity).remove(d.key.pk) }
-                                        )
+                                        PairedDeviceRow(d) { sendTo(d.asPeer()) }
                                     }
                                 }
                                 if (lists.nearby.isNotEmpty()) {
-                                    item {
-                                        SectionHeaderRow(title = OmaI18n.t("section_nearby"), count = lists.nearby.size, accentColor = MaterialTheme.colorScheme.secondary)
-                                    }
+                                    item { SectionLabel(OmaI18n.t("section_nearby")) }
                                     items(lists.nearby, key = { "share_n_${it.id}" }) { peer ->
-                                        NearbyPeerCard(peer = peer, selected = false, onSelect = { sendTo(peer) }, onSend = { sendTo(peer) })
+                                        NearbyDeviceRow(peer) { sendTo(peer) }
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            OutlinedButton(
-                                onClick = { showDirectIpDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(OmaI18n.t("add_ip"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = { showDirectIpDialog = true }) {
+                                Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(OmaI18n.t("connect_by_ip"))
                             }
-                            OutlinedButton(
-                                onClick = {
-                                    TransferBridge.shareViaSystem(this@ShareActivity, sharedUris, sharedText)
-                                    finish()
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(OmaI18n.t("system_share"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = {
+                                TransferBridge.shareViaSystem(this@ShareActivity, sharedUris, sharedText)
+                                finish()
+                            }) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(OmaI18n.t("system_share"))
                             }
                         }
                     }

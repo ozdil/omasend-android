@@ -57,26 +57,10 @@ private val LightColorScheme = lightColorScheme(
     error = OmarchyRed
 )
 
+/** Monospace is only for IDs and numbers; everything else uses the system font. */
 val JetBrainsMonoFontFamily: FontFamily = FontFamily.Monospace
 
-private val DefaultTypography = Typography()
-private val OmarchyTypography = Typography(
-    displayLarge = DefaultTypography.displayLarge.copy(fontFamily = JetBrainsMonoFontFamily),
-    displayMedium = DefaultTypography.displayMedium.copy(fontFamily = JetBrainsMonoFontFamily),
-    displaySmall = DefaultTypography.displaySmall.copy(fontFamily = JetBrainsMonoFontFamily),
-    headlineLarge = DefaultTypography.headlineLarge.copy(fontFamily = JetBrainsMonoFontFamily),
-    headlineMedium = DefaultTypography.headlineMedium.copy(fontFamily = JetBrainsMonoFontFamily),
-    headlineSmall = DefaultTypography.headlineSmall.copy(fontFamily = JetBrainsMonoFontFamily),
-    titleLarge = DefaultTypography.titleLarge.copy(fontFamily = JetBrainsMonoFontFamily),
-    titleMedium = DefaultTypography.titleMedium.copy(fontFamily = JetBrainsMonoFontFamily),
-    titleSmall = DefaultTypography.titleSmall.copy(fontFamily = JetBrainsMonoFontFamily),
-    bodyLarge = DefaultTypography.bodyLarge.copy(fontFamily = JetBrainsMonoFontFamily),
-    bodyMedium = DefaultTypography.bodyMedium.copy(fontFamily = JetBrainsMonoFontFamily),
-    bodySmall = DefaultTypography.bodySmall.copy(fontFamily = JetBrainsMonoFontFamily),
-    labelLarge = DefaultTypography.labelLarge.copy(fontFamily = JetBrainsMonoFontFamily),
-    labelMedium = DefaultTypography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
-    labelSmall = DefaultTypography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily)
-)
+private val OmarchyTypography = Typography()
 
 @Composable
 fun OmaSendTheme(
