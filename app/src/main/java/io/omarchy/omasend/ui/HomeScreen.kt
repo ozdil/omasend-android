@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,10 +50,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.omarchy.omasend.OmaSendApp
+import io.omarchy.omasend.R
 import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.crypto.OmaIdentity
@@ -172,22 +175,30 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("OmaSend", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier.size(7.dp).clip(CircleShape)
-                                    .background(if (visible) Emerald else MaterialTheme.colorScheme.outline)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            val name = NetworkUtils.getDeviceName(context)
-                            Text(
-                                text = if (visible) OmaI18n.f("home_visible", name) else OmaI18n.f("home_hidden", name),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.omasend_mark),
+                            contentDescription = null,
+                            modifier = Modifier.size(30.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("OmaSend", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(7.dp).clip(CircleShape)
+                                        .background(if (visible) Emerald else MaterialTheme.colorScheme.outline)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val name = NetworkUtils.getDeviceName(context)
+                                Text(
+                                    text = if (visible) OmaI18n.f("home_visible", name) else OmaI18n.f("home_hidden", name),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 },

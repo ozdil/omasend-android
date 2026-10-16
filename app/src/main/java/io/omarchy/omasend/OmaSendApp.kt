@@ -70,7 +70,7 @@ class OmaSendApp : Application() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_TRANSFERS)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_omasend)
             .setContentTitle(OmaI18n.t("incoming_title"))
             .setContentText(OmaI18n.f("incoming_request", prompt.senderName))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
