@@ -82,8 +82,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-/** "Encrypted / online" green: the green of the OmaSend mark. */
-val Emerald = Color(0xFF9ECE6A)
+/** "Encrypted / online" mark. Monochrome: brighter than the outline, no hue. */
+val Emerald = Color(0xFFC9D1D9)
 
 // ------------------------------------------------------------------ model
 

@@ -91,6 +91,32 @@ class OmaSendApp : Application() {
         }
     }
 
+    /**
+     * Lasting proof that a file arrived: the sound is skipped in silent mode and the
+     * in-app toast only shows while the app is open. Silent because the sound already played.
+     */
+    fun notifyFileReceived(fileName: String) {
+        val open = PendingIntent.getActivity(
+            this, 1,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_TRANSFERS)
+            .setSmallIcon(R.drawable.ic_stat_omasend)
+            .setContentTitle(OmaI18n.t("file_received_title"))
+            .setContentText(OmaI18n.f("file_received_text", fileName))
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setSilent(true)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(this).notify(NOTIFICATION_RECEIVED_ID, notification)
+        } catch (_: SecurityException) {
+            // Notification permission not granted.
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -206,6 +232,7 @@ class OmaSendApp : Application() {
         const val CHANNEL_SERVICE = "omasend_service_channel"
         const val CHANNEL_TRANSFERS = "omasend_transfers_channel"
         const val NOTIFICATION_SERVICE_ID = 1001
+        const val NOTIFICATION_RECEIVED_ID = 1002
 
         lateinit var instance: OmaSendApp
             private set

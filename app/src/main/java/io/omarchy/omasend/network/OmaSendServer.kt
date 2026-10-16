@@ -622,6 +622,7 @@ class OmaSendServer(private val context: Context) {
                     app?.hapticController?.onFileReceivedImpact()
                 } catch (_: Exception) {}
                 onFileReceived?.invoke(finalName, contentLength)
+                app?.notifyFileReceived(finalName)
             }
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)

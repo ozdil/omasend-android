@@ -233,7 +233,7 @@ fun OmaQrScannerDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF0F172A)),
+                        .background(Color(0xFF0D1117)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -243,7 +243,7 @@ fun OmaQrScannerDialog(
                         Icon(
                             imageVector = Icons.Default.CameraAlt,
                             contentDescription = null,
-                            tint = Color(0xFF64748B),
+                            tint = Color(0xFF6E7681),
                             modifier = Modifier.size(64.dp)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
@@ -257,7 +257,7 @@ fun OmaQrScannerDialog(
                         Text(
                             text = "OmaID QR kodunu taramak icin kamera izni verin veya galeriden bir gorsel secin.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF94A3B8),
+                            color = Color(0xFF8B949E),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(20.dp))
@@ -325,8 +325,8 @@ fun OmaQrScannerDialog(
                             .navigationBarsPadding()
                             .padding(16.dp),
                         shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF0F172A).copy(alpha = 0.95f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981))
+                        color = Color(0xFF0D1117).copy(alpha = 0.95f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE6EDF3))
                     ) {
                         Column(
                             modifier = Modifier.padding(20.dp),
@@ -339,14 +339,14 @@ fun OmaQrScannerDialog(
                                     modifier = Modifier
                                         .size(10.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF10B981))
+                                        .background(Color(0xFFE6EDF3))
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "OmaID Dogrulandi",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF10B981)
+                                    color = Color(0xFFE6EDF3)
                                 )
                             }
 
@@ -354,15 +354,15 @@ fun OmaQrScannerDialog(
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF1E293B),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                                color = Color(0xFF21262D),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF30363D))
                             ) {
                                 Text(
                                     text = detectedOmaId!!,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
-                                    color = Color(0xFF38BDF8),
+                                    color = Color(0xFFE6EDF3),
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                                     letterSpacing = 2.sp
                                 )
@@ -392,7 +392,7 @@ fun OmaQrScannerDialog(
                                         onOmaIdConnected(detectedOmaId!!)
                                     },
                                     modifier = Modifier.weight(1.5f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE6EDF3)),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -436,8 +436,8 @@ fun OmaQrScannerViewfinder(
         label = "LaserProgress"
     )
 
-    val primaryAccent = if (isSuccess) Color(0xFF10B981) else Color(0xFF38BDF8)
-    val secondaryAccent = if (isSuccess) Color(0xFF059669) else Color(0xFF0284C7)
+    val primaryAccent = if (isSuccess) Color(0xFFE6EDF3) else Color(0xFFE6EDF3)
+    val secondaryAccent = if (isSuccess) Color(0xFFB1BAC4) else Color(0xFF8B949E)
 
     Box(modifier = modifier.fillMaxSize()) {
         // 1. Canvas Mask & Corner Accents
@@ -460,7 +460,7 @@ fun OmaQrScannerViewfinder(
                 )
                 fillType = PathFillType.EvenOdd
             }
-            drawPath(path = path, color = Color(0xAA020617))
+            drawPath(path = path, color = Color(0xAA010409))
 
             // 4 Corner Accents
             val cornerBrush = Brush.linearGradient(
@@ -519,15 +519,15 @@ fun OmaQrScannerViewfinder(
         ) {
             IconButton(
                 onClick = onClose,
-                modifier = Modifier.background(Color(0xFF1E293B).copy(alpha = 0.85f), CircleShape)
+                modifier = Modifier.background(Color(0xFF21262D).copy(alpha = 0.85f), CircleShape)
             ) {
                 Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.White)
             }
 
             Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF0F172A).copy(alpha = 0.85f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                color = Color(0xFF0D1117).copy(alpha = 0.85f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF30363D))
             ) {
                 Text(
                     text = "OMAID TARA",
@@ -543,14 +543,14 @@ fun OmaQrScannerViewfinder(
             IconButton(
                 onClick = onFlashToggle,
                 modifier = Modifier.background(
-                    if (isFlashOn) Color(0xFF38BDF8).copy(alpha = 0.35f) else Color(0xFF1E293B).copy(alpha = 0.85f),
+                    if (isFlashOn) Color(0xFFE6EDF3).copy(alpha = 0.35f) else Color(0xFF21262D).copy(alpha = 0.85f),
                     CircleShape
                 )
             ) {
                 Icon(
                     imageVector = if (isFlashOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
                     contentDescription = "Flas",
-                    tint = if (isFlashOn) Color(0xFF38BDF8) else Color(0xFF94A3B8)
+                    tint = if (isFlashOn) Color(0xFFE6EDF3) else Color(0xFF8B949E)
                 )
             }
         }
@@ -568,11 +568,11 @@ fun OmaQrScannerViewfinder(
                 OutlinedButton(
                     onClick = onPickFromGallery,
                     colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF0F172A).copy(alpha = 0.85f),
+                        containerColor = Color(0xFF0D1117).copy(alpha = 0.85f),
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF30363D))
                 ) {
                     Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
@@ -582,11 +582,11 @@ fun OmaQrScannerViewfinder(
                 OutlinedButton(
                     onClick = onPasteFromClipboard,
                     colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF0F172A).copy(alpha = 0.85f),
-                        contentColor = Color(0xFF38BDF8)
+                        containerColor = Color(0xFF0D1117).copy(alpha = 0.85f),
+                        contentColor = Color(0xFFE6EDF3)
                     ),
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B949E))
                 ) {
                     Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))

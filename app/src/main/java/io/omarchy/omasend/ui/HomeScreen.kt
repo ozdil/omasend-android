@@ -23,11 +23,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -121,7 +119,6 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
     var showDirectIp by remember { mutableStateOf(false) }
     var showLink by remember { mutableStateOf(false) }
     var keyToRemove by remember { mutableStateOf<DeviceKey.TrustedKey?>(null) }
-    var urisAwaitingTarget by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pickFor by remember { mutableStateOf<DiscoveredPeer?>(null) }
     var refreshing by remember { mutableStateOf(false) }
 
@@ -145,13 +142,11 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
         }
     }
 
-    // Without an explicit device: your single online device of your own, otherwise ask.
+    // Files are always sent from a device's sheet, so the target is known.
     fun sendPicked(uris: List<Uri>) {
-        val p = pickFor
+        val p = pickFor ?: return
         pickFor = null
-        if (uris.isEmpty()) return
-        val target = p ?: lists.defaultOwn?.asPeer()
-        if (target != null) send(target, uris) else urisAwaitingTarget = uris
+        send(p, uris)
     }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { sendPicked(it) }
@@ -213,15 +208,6 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { pickFiles(null) },
-                icon = { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null) },
-                text = { Text(OmaI18n.t("send")) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         PullToRefreshBox(
@@ -240,7 +226,7 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 104.dp)
+                contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)
             ) {
                 // Sending, or receiving over the legacy path.
                 val active: TransferProgressState = when {
@@ -439,18 +425,6 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                 keyToRemove = null
             },
             onDismiss = { keyToRemove = null }
-        )
-    }
-
-    if (urisAwaitingTarget.isNotEmpty()) {
-        ChooseTargetDialog(
-            lists = lists,
-            onDismiss = { urisAwaitingTarget = emptyList() },
-            onSelect = { peer ->
-                val uris = urisAwaitingTarget
-                urisAwaitingTarget = emptyList()
-                send(peer, uris)
-            }
         )
     }
 }

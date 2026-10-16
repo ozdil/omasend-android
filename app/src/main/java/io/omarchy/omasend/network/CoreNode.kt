@@ -383,6 +383,7 @@ object CoreNode {
                             app.hapticController.onFileReceivedImpact()
                         }
                         app.server.onFileReceived?.invoke(finalNameOrError, size)
+                        app.notifyFileReceived(finalNameOrError)
                     }
                 } else {
                     Log.w(TAG, "could not save ${f.name} to Downloads ($finalNameOrError); kept at ${f.absolutePath}")

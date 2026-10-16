@@ -89,6 +89,8 @@ object OmaI18n {
 
         // ---- transfers
         "incoming" to mapOf("tr" to "Gelen aktarım", "en" to "Incoming transfer"),
+        "file_received_title" to mapOf("tr" to "Dosya alındı", "en" to "File received"),
+        "file_received_text" to mapOf("tr" to "%s İndirilenler/OmaSend klasörüne kaydedildi.", "en" to "%s was saved to Downloads/OmaSend."),
         "incoming_title" to mapOf("tr" to "Dosya isteği", "en" to "File request"),
         "incoming_request" to mapOf("tr" to "'%s' sana dosya göndermek istiyor.", "en" to "'%s' wants to send you files."),
         "incoming_encrypted" to mapOf("tr" to "Uçtan uca şifreli · eşleşmiş cihaz", "en" to "End-to-end encrypted · paired device"),
