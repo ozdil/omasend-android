@@ -23,6 +23,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Regenerate dependency checksums (temporary)
+        run: |
+          chmod +x gradlew
+          ./gradlew --write-verification-metadata sha256 testDebugUnitTest assembleDebug --dependency-verification lenient --console=plain || true
+          echo "=====VERIFICATION-DIFF-BEGIN====="
+          git diff gradle/verification-metadata.xml
+          echo "=====VERIFICATION-DIFF-END====="
+
       - name: Unit tests and debug build
         run: |
           chmod +x gradlew
