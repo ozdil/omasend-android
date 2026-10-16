@@ -16,8 +16,16 @@ import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.model.TransferFileInfo
 import io.omarchy.omasend.model.TransferProgressState
 import io.omarchy.omasend.ui.OmaI18n
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.omasend_core.CoreException
 import uniffi.omasend_core.Direction
 import uniffi.omasend_core.IncomingOffer
@@ -52,10 +60,36 @@ object CoreNode {
     private val sendListeners = ConcurrentHashMap<String, (String, Long, Long) -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 
+    enum class State { IDLE, STARTING, RUNNING, FAILED }
+
+    private val _state = MutableStateFlow(State.IDLE)
+    /** Readiness of the QUIC node; [node] is non-null only in [State.RUNNING]. */
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    @Volatile
+    var lastStartError: String? = null
+        private set
+
+    /**
+     * Starts the node on [scope] (an IO scope): the core retries a busy port for several
+     * seconds and the device key needs the Keystore, neither of which may run on the main
+     * thread. Callers that need the node use [awaitNode] or handle a null [node].
+     */
+    fun startAsync(app: OmaSendApp, scope: CoroutineScope) {
+        this.app = app
+        if (!_state.compareAndSet(State.IDLE, State.STARTING) && !_state.compareAndSet(State.FAILED, State.STARTING)) return
+        scope.launch(Dispatchers.IO) { start(app) }
+    }
+
+    /** Blocking start; prefer [startAsync]. */
     @Synchronized
     fun start(app: OmaSendApp) {
         this.app = app
-        if (node != null) return
+        if (node != null) {
+            _state.value = State.RUNNING
+            return
+        }
+        _state.value = State.STARTING
         try {
             val dir = File(app.getExternalFilesDir(null) ?: app.filesDir, "incoming").apply { mkdirs() }
             node = OmaNode.start(
@@ -66,11 +100,34 @@ object CoreNode {
                 false,
                 Callbacks(app)
             )
+            lastStartError = null
+            _state.value = State.RUNNING
             Log.i(TAG, "core node started on UDP ${node?.boundPort()}")
         } catch (t: Throwable) {
             // Unpaired peers keep working over HTTP; paired devices report a clear error.
+            // This includes DeviceKey.DeviceKeyUnavailableException: the stored key is kept.
+            lastStartError = t.message
+            _state.value = State.FAILED
             Log.w(TAG, "core node unavailable: ${t.message}")
         }
+    }
+
+    /** The running node, waiting up to [timeoutMs] while a start is in progress. */
+    suspend fun awaitNode(timeoutMs: Long = 15_000L): OmaNode? {
+        node?.let { return it }
+        if (_state.value != State.STARTING) return node
+        withTimeoutOrNull(timeoutMs) { state.first { it != State.STARTING } }
+        return node
+    }
+
+    /**
+     * The QUIC port to advertise while pairing. Waits (blocking, background threads only) for a
+     * start in progress so the peer learns the port the core actually bound; falls back to the
+     * default port if the node is not running.
+     */
+    fun advertisedQuicPort(waitMs: Long = 10_000L): Int {
+        val n = node ?: if (_state.value == State.STARTING) runBlocking { awaitNode(waitMs) } else null
+        return n?.boundPort()?.toInt() ?: QUIC_PORT
     }
 
     fun isQuicOffer(token: String) = quicOffers.contains(token)
@@ -122,7 +179,10 @@ object CoreNode {
 
     /** Encrypted clipboard push to a paired key. Never downgraded to HTTP. */
     fun sendClipboard(key: DeviceKey.TrustedKey, text: String, extraIp: String? = null): Result<Unit> {
-        val n = node ?: return Result.failure(IllegalStateException(OmaI18n.t("err_core_not_running")))
+        // Blocking network call: always invoked off the main thread, so waiting for a start that
+        // is still in progress (A5: the node now starts asynchronously) is fine here.
+        val n = node ?: (if (_state.value == State.STARTING) runBlocking { awaitNode() } else null)
+            ?: return Result.failure(IllegalStateException(OmaI18n.t("err_core_not_running")))
         val addrs = addrsFor(key, extraIp)
         if (addrs.isEmpty()) return Result.failure(IllegalStateException(friendlyError(key.name, "no address")))
         return try {
@@ -161,7 +221,7 @@ object CoreNode {
         extraIp: String?,
         onState: (TransferProgressState) -> Unit
     ) = withContext(Dispatchers.IO) {
-        val n = node
+        val n = awaitNode()
         if (n == null) {
             withContext(Dispatchers.Main) { onState(TransferProgressState.Error(OmaI18n.t("err_core_not_running"))) }
             return@withContext

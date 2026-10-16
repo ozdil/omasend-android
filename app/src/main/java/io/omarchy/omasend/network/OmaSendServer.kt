@@ -588,7 +588,7 @@ class OmaSendServer(private val context: Context) {
             sendResponse(output, 503, "Service Unavailable", "application/json", "{\"error\":\"Device key unavailable on this device\"}")
             return
         }
-        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT)
+        DeviceKey.acceptPairRequest(deviceIdentity, NetworkUtils.getDeviceName(context), obj, peerIp, CoreNode.advertisedQuicPort())
             .onSuccess { (resp, key) ->
                 trustStore.upsert(key)
                 Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }

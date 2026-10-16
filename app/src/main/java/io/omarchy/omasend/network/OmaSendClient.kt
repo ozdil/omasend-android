@@ -125,7 +125,7 @@ class OmaSendClient(private val context: Context) {
         val offer = DeviceKey.parsePairUri(uri).getOrThrow()
         require(NetworkUtils.isPrivateOrLocalIp(offer.host)) { "Pairing is only allowed on the local network" }
         val id = DeviceKey.identity(context)
-        val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+        val myQuic = CoreNode.advertisedQuicPort()
         val body = DeviceKey.buildPairRequest(id, offer, NetworkUtils.getDeviceName(context), myQuic).toString()
         val request = Request.Builder()
             .url("http://${offer.host}:${offer.port}/api/v2/pair")
