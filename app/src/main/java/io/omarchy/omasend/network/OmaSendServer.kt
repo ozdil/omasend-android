@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import io.omarchy.omasend.crypto.DeviceKey
+import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.model.ClipboardPayload
 import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.model.TransferRequest
@@ -15,7 +16,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -328,6 +334,14 @@ class OmaSendServer(private val context: Context) {
                 method == "POST" && path == "/api/v2/pair" -> {
                     handlePairV2(input, output, contentLength, peerIp, remainingDeadline)
                 }
+                method == "POST" && (path == "/api/v2/link/start" || path == "/api/v2/link/finish") -> {
+                    // Linking is LAN-only; visibility OFF was already refused above.
+                    if (!isPrivatePeer) {
+                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Linking not available\"}")
+                    } else {
+                        handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
+                    }
+                }
                 method == "POST" && path == "/api/p2p/request" -> {
                     handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
                 }
@@ -570,6 +584,62 @@ class OmaSendServer(private val context: Context) {
         } else {
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
         }
+    }
+
+    private val linkResponder = OmaLink.Responder()
+
+    private fun handleLink(path: String, input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
+        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
+        val obj = body?.let {
+            try {
+                json.parseToJsonElement(String(it, Charsets.UTF_8)).jsonObject
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (obj == null) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (path == "/api/v2/link/start") {
+            val pA = (obj["pA"] as? JsonPrimitive)?.contentOrNull
+            val v = (obj["v"] as? JsonPrimitive)?.intOrNull
+            val res = if (v == 1 && pA != null) {
+                linkResponder.start(OmaLink.accountId(context), peerIp, pA, now)
+            } else {
+                OmaLink.StartResult.Bad("Unsupported link request")
+            }
+            when (res) {
+                is OmaLink.StartResult.Ok -> sendResponse(output, 200, "OK", "application/json", res.body.toString())
+                OmaLink.StartResult.RateLimited ->
+                    sendResponse(output, 429, "Too Many Requests", "application/json", "{\"error\":\"Too many link attempts\"}")
+                is OmaLink.StartResult.Bad ->
+                    sendResponse(output, 400, "Bad Request", "application/json", buildJsonObject { put("error", res.message) }.toString())
+            }
+            return
+        }
+        val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+        linkResponder.finish(deviceIdentity, NetworkUtils.getDeviceName(context), myQuic, peerIp, obj, now)
+            .onSuccess { (peer, reply) ->
+                val ts = DeviceKey.nowSecs()
+                val key = DeviceKey.TrustedKey(
+                    pk = peer.pk,
+                    device_id = DeviceKey.deviceIdForPk(DeviceKey.decodePk(peer.pk)!!),
+                    name = peer.name,
+                    ip = peerIp,
+                    quic_port = peer.quicPort,
+                    own_device = true,
+                    added_at = ts,
+                    last_seen = ts
+                )
+                trustStore.upsert(key)
+                Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }
+                sendResponse(output, 200, "OK", "application/json", reply.toString())
+            }
+            .onFailure {
+                sendResponse(output, 403, "Forbidden", "application/json", buildJsonObject { put("error", it.message ?: "Link failed") }.toString())
+            }
     }
 
     private fun handlePairV2(input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
@@ -360,6 +361,7 @@ fun AddDeviceSheet(
     onDismiss: () -> Unit,
     onScan: () -> Unit,
     onConnectByIp: () -> Unit,
+    onLinkWithOmaId: () -> Unit,
     onPaired: (String) -> Unit
 ) {
     var showQr by remember { mutableStateOf(false) }
@@ -417,6 +419,11 @@ fun AddDeviceSheet(
                     Text(OmaI18n.t("show_my_qr"), style = MaterialTheme.typography.titleSmall)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
+                TextButton(onClick = onLinkWithOmaId) {
+                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(OmaI18n.t("omaid_link"))
+                }
                 TextButton(onClick = onConnectByIp) {
                     Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))

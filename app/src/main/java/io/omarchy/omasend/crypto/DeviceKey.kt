@@ -140,18 +140,21 @@ object DeviceKey {
         null
     }
 
-    private fun wrap(seed: ByteArray): ByteArray? {
+    /** Encrypts a small secret with the Keystore wrapping key (null if the Keystore is unusable). */
+    internal fun wrap(seed: ByteArray): ByteArray? {
         val key = wrapKey() ?: return null
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, key)
         return c.iv + c.doFinal(seed)
     }
 
-    private fun unwrap(blob: ByteArray): ByteArray? = try {
+    private fun unwrap(blob: ByteArray): ByteArray? = unwrapSecret(blob)?.takeIf { it.size == 32 }
+
+    internal fun unwrapSecret(blob: ByteArray): ByteArray? = try {
         val key = wrapKey() ?: return null
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12)))
-        c.doFinal(blob.copyOfRange(12, blob.size)).takeIf { it.size == 32 }
+        c.doFinal(blob.copyOfRange(12, blob.size))
     } catch (_: Exception) {
         null
     }

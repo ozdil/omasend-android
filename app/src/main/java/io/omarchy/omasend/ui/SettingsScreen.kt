@@ -55,6 +55,7 @@ import io.omarchy.omasend.BuildConfig
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.crypto.OmaIdentity
+import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.model.DiscoveryMode
 import io.omarchy.omasend.network.NetworkUtils
 import io.omarchy.omasend.service.OmaSendForegroundService
@@ -96,7 +97,7 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
     val context = LocalContext.current
     val discoveryMode by app.discoveryManager.discoveryMode.collectAsState()
 
-    var omaId by remember { mutableStateOf(app.omaIdentity.formattedId) }
+    var omaId by remember { mutableStateOf(OmaLink.accountId(context)) }
     var revealed by remember { mutableStateOf(false) }
     var deviceName by remember { mutableStateOf(NetworkUtils.getDeviceName(context)) }
     var soundOn by remember { mutableStateOf(app.soundEngine.isSoundEnabled()) }
@@ -162,7 +163,7 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(OmaI18n.t("omaid_body"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedButton(onClick = { showOmaIdEntry = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_use_existing")) }
+                    OutlinedButton(onClick = { showOmaIdEntry = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_link")) }
                     TextButton(onClick = { showOmaIdReset = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_new")) }
                 }
             }
@@ -225,12 +226,13 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
     }
 
     if (showOmaIdEntry) {
-        OmaIdEntryDialog(
+        LinkWithOmaIdDialog(
+            app = app,
             onDismiss = { showOmaIdEntry = false },
-            onConfirm = { id ->
-                omaId = app.setCustomOmaIdentity(id).formattedId
+            onLinked = { names ->
+                omaId = OmaLink.accountId(context)
                 showOmaIdEntry = false
-                Toast.makeText(context, OmaI18n.t("omaid_changed"), Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, OmaI18n.f("omaid_linked", names.joinToString(", ")), Toast.LENGTH_LONG).show()
             }
         )
     }
@@ -241,7 +243,7 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
             body = OmaI18n.t("omaid_new_confirm"),
             confirmLabel = OmaI18n.t("omaid_new"),
             onConfirm = {
-                omaId = app.resetOmaIdentity().formattedId
+                omaId = OmaLink.newAccountId(context)
                 revealed = true
                 showOmaIdReset = false
             },

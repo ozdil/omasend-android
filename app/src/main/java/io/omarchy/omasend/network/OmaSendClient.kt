@@ -7,6 +7,8 @@ import io.omarchy.omasend.model.TransferDecision
 import io.omarchy.omasend.model.TransferFileInfo
 import io.omarchy.omasend.model.TransferRequest
 import io.omarchy.omasend.model.TransferResponse
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -149,6 +151,79 @@ class OmaSendClient(private val context: Context) {
             key
         }
     }
+
+    private fun postJson(url: String, body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject {
+        val request = Request.Builder().url(url).post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        return client.newCall(request).execute().use { response ->
+            val text = response.body.string().ifEmpty { error("Empty response") }
+            val obj = json.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject ?: error("Malformed response")
+            if (!response.isSuccessful) {
+                error((obj["error"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Rejected (${response.code})")
+            }
+            obj
+        }
+    }
+
+    private fun linkOne(host: String, port: Int, accountId: String): Result<DeviceKey.TrustedKey> = runCatching {
+        val base = "http://$host:$port/api/v2/link"
+        val ini = io.omarchy.omasend.crypto.OmaLink.Initiator(accountId)
+        val pA = DeviceKey.b64(ini.pA)
+        val start = postJson("$base/start", kotlinx.serialization.json.buildJsonObject {
+            put("v", kotlinx.serialization.json.JsonPrimitive(1))
+            put("pA", kotlinx.serialization.json.JsonPrimitive(pA))
+        })
+        fun field(k: String) = (start[k] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: error("Missing $k")
+        val pB = field("pB")
+        // Fails here for every device on another account; nothing more is sent.
+        val keys = ini.finish(DeviceKey.unb64(pB) ?: error("Invalid pB"), DeviceKey.unb64(field("cB")) ?: error("Invalid cB")).getOrThrow()
+        val id = DeviceKey.identity(context)
+        val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+        val reply = postJson("$base/finish", kotlinx.serialization.json.buildJsonObject {
+            put("sid", kotlinx.serialization.json.JsonPrimitive(field("sid")))
+            put("cA", kotlinx.serialization.json.JsonPrimitive(DeviceKey.b64(keys.cA)))
+            put("box", kotlinx.serialization.json.JsonPrimitive(
+                io.omarchy.omasend.crypto.OmaLink.initiatorBox(id, keys, pA, pB, NetworkUtils.getDeviceName(context), myQuic)
+            ))
+        })
+        val sealed = (reply["box"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: error("Missing box")
+        val peer = io.omarchy.omasend.crypto.OmaLink.openResponderBox(keys, pA, pB, id.publicB64, sealed).getOrThrow()
+        val now = DeviceKey.nowSecs()
+        val key = DeviceKey.TrustedKey(
+            pk = peer.pk,
+            device_id = DeviceKey.deviceIdForPk(DeviceKey.decodePk(peer.pk)!!),
+            name = peer.name,
+            ip = host,
+            port = port,
+            quic_port = peer.quicPort,
+            own_device = true,
+            added_at = now,
+            last_seen = now
+        )
+        DeviceKey.TrustStore(context).upsert(key)
+        key
+    }
+
+    /**
+     * "Link with OmaID": tries every nearby, not yet trusted v2 device in parallel. Only devices
+     * holding [accountId] complete the exchange. On any success the number becomes this
+     * device's account OmaID too. Returns the linked devices (empty if none matched).
+     */
+    suspend fun linkWithAccountId(accountId: String, peers: List<io.omarchy.omasend.model.DiscoveredPeer>): Result<List<DeviceKey.TrustedKey>> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                require(io.omarchy.omasend.crypto.OmaIdentity.isValid(accountId)) { "Invalid OmaID" }
+                val myPk = DeviceKey.identity(context).publicB64
+                val known = DeviceKey.TrustStore(context).load().map { it.pk }.toSet()
+                val targets = peers.filter {
+                    it.pk.isNotBlank() && it.pk != myPk && it.pk !in known && NetworkUtils.isPrivateOrLocalIp(it.ip)
+                }.distinctBy { it.pk }
+                val linked = kotlinx.coroutines.coroutineScope {
+                    targets.map { p -> async { linkOne(p.ip, p.port, accountId).getOrNull() } }.awaitAll().filterNotNull()
+                }
+                if (linked.isNotEmpty()) io.omarchy.omasend.crypto.OmaLink.setAccountId(context, accountId)
+                linked
+            }
+        }
 
     fun sendTransferRequest(
         targetIp: String,

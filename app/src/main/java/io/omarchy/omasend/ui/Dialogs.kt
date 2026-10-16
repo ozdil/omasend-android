@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,16 +57,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.crypto.OmaIdentity
 import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.model.TransferProgressState
 import io.omarchy.omasend.network.CoreNode
 import io.omarchy.omasend.network.NetworkUtils
 import io.omarchy.omasend.ui.theme.JetBrainsMonoFontFamily
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ------------------------------------------------------------------ transfer status
 
@@ -326,10 +330,10 @@ fun OmaIdEntryDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     val valid = OmaIdentity.isValid(digits)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(OmaI18n.t("omaid_use_existing")) },
+        title = { Text(OmaI18n.t("omaid_link")) },
         text = {
             Column {
-                Text(OmaI18n.t("omaid_use_existing_body"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(OmaI18n.t("omaid_link_body"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = digits,
@@ -344,9 +348,53 @@ fun OmaIdEntryDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                 )
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(digits) }, enabled = valid) { Text(OmaI18n.t("save")) } },
+        confirmButton = { Button(onClick = { onConfirm(digits) }, enabled = valid) { Text(OmaI18n.t("omaid_link_go")) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(OmaI18n.t("cancel")) } }
     )
+}
+
+/**
+ * "Link with OmaID": type the number from your other device and every nearby device on that
+ * account becomes one of yours. The number itself never leaves this phone (SPAKE2, see OmaLink).
+ */
+@Composable
+fun LinkWithOmaIdDialog(app: OmaSendApp, onDismiss: () -> Unit, onLinked: (List<String>) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var linking by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    when {
+        linking -> AlertDialog(
+            onDismissRequest = {},
+            title = { Text(OmaI18n.t("omaid_link")) },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Text(OmaI18n.t("omaid_linking"), style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {}
+        )
+        error != null -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(OmaI18n.t("omaid_link")) },
+            text = { Text(error ?: "", style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = { Button(onClick = { error = null }) { Text(OmaI18n.t("try_again")) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(OmaI18n.t("close")) } }
+        )
+        else -> OmaIdEntryDialog(onDismiss = onDismiss, onConfirm = { id ->
+            linking = true
+            scope.launch {
+                app.discoveryManager.forceRefresh()
+                delay(1500)
+                val res = app.client.linkWithAccountId(id, app.discoveryManager.peers.value)
+                linking = false
+                res.onSuccess { linked ->
+                    if (linked.isEmpty()) error = OmaI18n.t("omaid_link_none") else onLinked(linked.map { it.name })
+                }.onFailure { error = it.message ?: OmaI18n.t("omaid_link_none") }
+            }
+        })
+    }
 }
 
 @Composable

@@ -115,6 +115,7 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
     var showAddDevice by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
     var showDirectIp by remember { mutableStateOf(false) }
+    var showLink by remember { mutableStateOf(false) }
     var keyToRemove by remember { mutableStateOf<DeviceKey.TrustedKey?>(null) }
     var urisAwaitingTarget by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pickFor by remember { mutableStateOf<DiscoveredPeer?>(null) }
@@ -353,6 +354,10 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                 showAddDevice = false
                 showDirectIp = true
             },
+            onLinkWithOmaId = {
+                showAddDevice = false
+                showLink = true
+            },
             onPaired = { name ->
                 showAddDevice = false
                 Toast.makeText(context, OmaI18n.f("paired_with", name), Toast.LENGTH_LONG).show()
@@ -381,6 +386,17 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                 app.discoveryManager.addPairedOmaId(OmaIdentity.format(scannedId))
                 app.discoveryManager.forceRefresh()
                 Toast.makeText(context, OmaI18n.t("legacy_omaid_added"), Toast.LENGTH_LONG).show()
+            }
+        )
+    }
+
+    if (showLink) {
+        LinkWithOmaIdDialog(
+            app = app,
+            onDismiss = { showLink = false },
+            onLinked = { names ->
+                showLink = false
+                Toast.makeText(context, OmaI18n.f("omaid_linked", names.joinToString(", ")), Toast.LENGTH_LONG).show()
             }
         )
     }

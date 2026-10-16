@@ -121,15 +121,19 @@ object OmaI18n {
 
         // ---- settings: OmaID
         "omaid" to mapOf("tr" to "OmaID", "en" to "OmaID"),
-        "omaid_body" to mapOf("tr" to "Hesap numaran. E-posta yok, şifre yok. Aynı numarayı diğer cihazlarına girdiğinde birbirlerini tanırlar. Şifreli aktarım için cihazlarını bir kez QR ile eşleştir.", "en" to "Your account number. No email, no password. Devices that use the same number recognize each other. Pair them once by QR for encrypted transfers."),
+        "omaid_body" to mapOf("tr" to "Hesap numaran. E-posta yok, şifre yok, hiçbir yere gönderilmez. Yeni bir cihazını eklemek için bu numarayı o cihazda \"OmaID ile bağla\"ya gir. İki cihaz da aynı ağda ve OmaSend açık olmalı.", "en" to "Your account number. No email, no password, never sent anywhere. To add another device of yours, enter this number there under \"Link with OmaID\". Both devices need OmaSend open on the same network."),
+        "omaid_link" to mapOf("tr" to "OmaID ile bağla", "en" to "Link with OmaID"),
+        "omaid_link_body" to mapOf("tr" to "Diğer cihazındaki 16 haneli OmaID'yi gir. Aynı numarayı kullanan yakındaki cihazlar senin cihazın olarak eklenir.", "en" to "Enter the 16-digit OmaID from your other device. Nearby devices that use this number are added as your devices."),
+        "omaid_link_go" to mapOf("tr" to "Bağla", "en" to "Link"),
+        "omaid_linking" to mapOf("tr" to "Yakındaki cihazlar aranıyor…", "en" to "Looking for nearby devices…"),
+        "omaid_link_none" to mapOf("tr" to "Bu numarayı kullanan yakın bir cihaz bulunamadı. Diğer cihazda OmaSend açık ve görünür olsun, aynı ağda olun.", "en" to "No nearby device uses this number. Keep OmaSend open and visible on the other device, on the same network."),
+        "omaid_linked" to mapOf("tr" to "Bağlandı: %s", "en" to "Linked: %s"),
+        "omaid_new_confirm" to mapOf("tr" to "Bu cihaz yeni bir hesap numarası alır. Zaten bağlı cihazlar bağlı kalır; yeni cihazları yeni numarayla bağlarsın.", "en" to "This device gets a new account number. Devices already linked stay linked; new devices link with the new number."),
+        "try_again" to mapOf("tr" to "Tekrar dene", "en" to "Try again"),
         "omaid_show" to mapOf("tr" to "Numarayı göster", "en" to "Show number"),
         "omaid_hide" to mapOf("tr" to "Numarayı gizle", "en" to "Hide number"),
-        "omaid_use_existing" to mapOf("tr" to "Başka bir OmaID kullan", "en" to "Use another OmaID"),
-        "omaid_use_existing_body" to mapOf("tr" to "Diğer cihazındaki 16 haneli OmaID'yi gir.", "en" to "Enter the 16-digit OmaID from your other device."),
         "omaid_invalid" to mapOf("tr" to "Geçerli bir OmaID değil.", "en" to "Not a valid OmaID."),
         "omaid_new" to mapOf("tr" to "Yeni numara oluştur", "en" to "Create a new number"),
-        "omaid_new_confirm" to mapOf("tr" to "Bu cihaz yeni bir OmaID alacak. Eski numarayı kullanan cihazlar bu cihazı artık kendi grubunda görmeyecek. QR eşleşmeleri etkilenmez.", "en" to "This device will get a new OmaID. Devices using the old number will no longer group with it. QR pairings are not affected."),
-        "omaid_changed" to mapOf("tr" to "OmaID güncellendi", "en" to "OmaID updated"),
 
         // ---- settings: rest
         "this_device" to mapOf("tr" to "Bu cihaz", "en" to "This device"),
