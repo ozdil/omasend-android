@@ -10,9 +10,10 @@ val OmarchySurfaceContainerHigh = Color(0xFF282E38)
 val OmarchyBorder = Color(0xFF30363D)
 val OmarchyBorderSubtle = Color(0xFF21262D)
 
-val OmarchyCyan = Color(0xFF00E5FF)
-val OmarchyCyanDark = Color(0xFF004D56)
-val OmarchyCyanLight = Color(0xFF80F2FF)
+// Accent: the blue of the OmaSend mark (Tokyo Night), so the UI matches the logo.
+val OmarchyAccent = Color(0xFF7AA2F7)
+val OmarchyAccentDark = Color(0xFF2E3C64)
+val OmarchyAccentLight = Color(0xFFC0CAF5)
 
 val OmarchyBlue = Color(0xFF38BDF8)
 val OmarchyBlueDark = Color(0xFF0369A1)
@@ -35,10 +36,10 @@ val OmarchyLightSurfaceContainerHigh = Color(0xFFE1E7EE)
 val OmarchyLightBorder = Color(0xFFD0D7DE)
 val OmarchyLightBorderSubtle = Color(0xFFE2E8F0)
 
-val OmarchyLightPrimary = Color(0xFF006874)
+val OmarchyLightPrimary = Color(0xFF34548A)
 val OmarchyLightOnPrimary = Color(0xFFFFFFFF)
-val OmarchyLightPrimaryContainer = Color(0xFF97F0FF)
-val OmarchyLightOnPrimaryContainer = Color(0xFF001F24)
+val OmarchyLightPrimaryContainer = Color(0xFFD5E0FF)
+val OmarchyLightOnPrimaryContainer = Color(0xFF0F1E44)
 
 val OmarchyLightSecondary = Color(0xFF0284C7)
 val OmarchyLightOnSecondary = Color(0xFFFFFFFF)

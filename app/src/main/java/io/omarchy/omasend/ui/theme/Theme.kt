@@ -13,10 +13,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 
 private val DarkColorScheme = darkColorScheme(
-    primary = OmarchyCyan,
+    primary = OmarchyAccent,
     onPrimary = OmarchyDarkBg,
-    primaryContainer = OmarchyCyanDark,
-    onPrimaryContainer = OmarchyCyanLight,
+    primaryContainer = OmarchyAccentDark,
+    onPrimaryContainer = OmarchyAccentLight,
     secondary = OmarchyBlue,
     onSecondary = OmarchyDarkBg,
     secondaryContainer = OmarchyBlueDark,
