@@ -38,11 +38,11 @@ object StorageUtils {
     private val _incomingFileName = MutableStateFlow<String?>(null)
     val incomingFileName: StateFlow<String?> = _incomingFileName.asStateFlow()
 
-    @Volatile
-    private var cancelIncomingRequested: Boolean = false
+    private val cancellation = IncomingCancellation()
 
+    /** Cancels the most recently started incoming stream (the one the UI shows). */
     fun cancelIncomingTransfer() {
-        cancelIncomingRequested = true
+        cancellation.cancelLatest()
     }
 
     @android.annotation.SuppressLint("UsableSpace")
@@ -124,7 +124,7 @@ object StorageUtils {
 
         val cleanName = sanitizeFilename(filename)
         val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
-        cancelIncomingRequested = false
+        val transferId = cancellation.begin()
         _incomingFileName.value = cleanName
         _incomingTransferMetrics.value = TransferMetrics(0L, totalBytes, 0, 0.0, 0L)
 
@@ -143,7 +143,7 @@ object StorageUtils {
                 try {
                     resolver.openOutputStream(uri)?.let { rawOut ->
                         java.io.BufferedOutputStream(rawOut, STREAM_CHUNK_SIZE).use { out ->
-                            pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, onProgressWithMetrics)
+                            pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, transferId, onProgressWithMetrics)
                         }
                     } ?: throw java.io.IOException("Cannot open output stream for MediaStore URI")
 
@@ -189,7 +189,7 @@ object StorageUtils {
 
                 try {
                     java.io.BufferedOutputStream(FileOutputStream(target), STREAM_CHUNK_SIZE).use { out ->
-                        pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, onProgressWithMetrics)
+                        pipeStreamWithBackpressure(inputStream, out, totalBytes, deadlineMs, speedCalculator, transferId, onProgressWithMetrics)
                     }
                     _incomingTransferMetrics.value = null
                     _incomingFileName.value = null
@@ -205,6 +205,8 @@ object StorageUtils {
             _incomingTransferMetrics.value = null
             _incomingFileName.value = null
             Pair(false, e.message ?: "Unknown storage error")
+        } finally {
+            cancellation.end(transferId)
         }
     }
 
@@ -214,6 +216,7 @@ object StorageUtils {
         totalBytes: Long,
         deadlineMs: Long,
         speedCalculator: TransferSpeedCalculator,
+        transferId: Long,
         onProgress: ((bytesRead: Long, total: Long, metrics: TransferMetrics) -> Unit)?
     ) {
         if (totalBytes == 0L) {
@@ -230,7 +233,7 @@ object StorageUtils {
         var chunksSinceFlush = 0
 
         while (remaining > 0) {
-            if (cancelIncomingRequested) {
+            if (cancellation.isCancelled(transferId)) {
                 throw java.io.InterruptedIOException("Transfer cancelled by user")
             }
             if (System.currentTimeMillis() > deadlineMs) {
