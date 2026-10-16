@@ -701,24 +701,21 @@ class OmaSendServer(private val context: Context) {
             io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
             else -> ""
         }
-        val providedPin = headers["x-omasend-pin"]
-            ?: getQueryParam(query, "pin").ifBlank { null }
-            ?: payload.pin
+        // A15: secrets are accepted only in headers or the JSON body, never in the URL query
+        // (neither the desktop nor the Android client sends them there; URLs end up in logs).
+        val providedPin = headers["x-omasend-pin"] ?: payload.pin
 
         val providedKey = headers["x-omasend-key"]
             ?: headers["authorization"]?.removePrefix("Bearer ")?.trim()
-            ?: getQueryParam(query, "token").ifBlank { null }
             ?: payload.token
 
         val expectedPin = NetworkUtils.getDevicePin(context)
         val expectedSessionKey = NetworkUtils.getDeviceSessionKey(context)
 
-        val isPinValid = !providedPin.isNullOrBlank() && providedPin == expectedPin
-        val isKeyValid = !providedKey.isNullOrBlank() && providedKey == expectedSessionKey
-
-        val isTokenValid = !providedKey.isNullOrBlank() &&
-            pendingTransfers.get(providedKey)?.status == PendingTransferRegistry.STATUS_ACCEPTED &&
-            pendingTransfers.isActive(providedKey)
+        // Constant-time comparisons. An accepted file-transfer token no longer authorizes
+        // clipboard writes: it was never meant as a clipboard credential.
+        val isPinValid = !providedPin.isNullOrBlank() && constantTimeEquals(providedPin, expectedPin)
+        val isKeyValid = !providedKey.isNullOrBlank() && constantTimeEquals(providedKey, expectedSessionKey)
 
         // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
         // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
@@ -731,7 +728,7 @@ class OmaSendServer(private val context: Context) {
         }
         val isVerifiedDevice = v2 is DeviceKey.AuthResult.Trusted
 
-        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid || isTokenValid
+        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -749,7 +746,7 @@ class OmaSendServer(private val context: Context) {
                     401,
                     "Unauthorized",
                     "application/json",
-                    "{\"error\":\"Unauthorized clipboard write: valid OmaID, PIN, session key, or paired token required\"}"
+                    "{\"error\":\"Unauthorized clipboard write: paired device key, paired OmaID, PIN or session key required\"}"
                 )
             }
             return
@@ -832,6 +829,14 @@ class OmaSendServer(private val context: Context) {
         } catch (_: Exception) {
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to read image\"}")
         }
+    }
+
+    private fun constantTimeEquals(provided: String, expected: String?): Boolean {
+        if (expected.isNullOrEmpty()) return false
+        return java.security.MessageDigest.isEqual(
+            provided.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8)
+        )
     }
 
     private fun getQueryParam(query: String, param: String): String {
