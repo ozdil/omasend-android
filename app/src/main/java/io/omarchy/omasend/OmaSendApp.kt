@@ -1,12 +1,19 @@
 package io.omarchy.omasend
 
+import android.app.Activity
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import io.omarchy.omasend.audio.OmaSoundEngine
 import io.omarchy.omasend.crypto.OmaIdentity
+import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.network.DiscoveryManager
 import io.omarchy.omasend.network.NetworkConnectivityWatcher
 import io.omarchy.omasend.network.NetworkTransportMode
@@ -14,7 +21,12 @@ import io.omarchy.omasend.network.OmaSendClient
 import io.omarchy.omasend.network.OmaSendServer
 import io.omarchy.omasend.network.WanDiscoveryEngine
 import io.omarchy.omasend.repository.ClipboardVault
+import io.omarchy.omasend.ui.OmaI18n
 import io.omarchy.omasend.ui.haptics.OmaHapticController
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class OmaSendApp : Application() {
     lateinit var discoveryManager: DiscoveryManager
@@ -36,6 +48,43 @@ class OmaSendApp : Application() {
     lateinit var networkWatcher: NetworkConnectivityWatcher
         private set
 
+    /** Incoming transfer requests waiting for a decision, oldest first. */
+    private val _incomingPrompts = MutableStateFlow<List<IncomingTransferPrompt>>(emptyList())
+    val incomingPrompts: StateFlow<List<IncomingTransferPrompt>> = _incomingPrompts.asStateFlow()
+
+    @Volatile private var resumedActivities = 0
+
+    /** Removes a prompt once it was answered (or its request is gone) and clears its notification. */
+    fun dismissPrompt(token: String) {
+        _incomingPrompts.update { list -> list.filterNot { it.token == token } }
+        NotificationManagerCompat.from(this).cancel(token.hashCode())
+    }
+
+    private fun onIncomingPrompt(prompt: IncomingTransferPrompt) {
+        _incomingPrompts.update { list -> list.filterNot { it.token == prompt.token } + prompt }
+        if (resumedActivities > 0) return
+        // App in the background: the request would expire unseen, so surface it.
+        val open = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_TRANSFERS)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(OmaI18n.t("incoming_title"))
+            .setContentText(OmaI18n.f("incoming_request", prompt.senderName))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(this).notify(prompt.token.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // Notification permission not granted; the prompt still waits in the app.
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -51,7 +100,17 @@ class OmaSendApp : Application() {
         discoveryManager = DiscoveryManager(this)
         server = OmaSendServer(this).apply {
             getDiscoveryMode = { discoveryManager.discoveryMode.value }
+            onIncomingTransferPrompt = { onIncomingPrompt(it) }
         }
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) { resumedActivities++ }
+            override fun onActivityPaused(activity: Activity) { resumedActivities-- }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
         client = OmaSendClient(this)
 
         networkWatcher = NetworkConnectivityWatcher(this).apply {

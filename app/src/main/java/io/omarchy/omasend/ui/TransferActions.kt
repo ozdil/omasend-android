@@ -48,9 +48,7 @@ suspend fun sendMultipleUrisToPeer(
                         if (sizeIndex != -1) fileSize = cursor.getLong(sizeIndex)
                     }
                 }
-                if (fileSize <= 0) {
-                    fileSize = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() } ?: 0L
-                }
+                if (fileSize <= 0) fileSize = measureUriSize(context, uri)
                 prepared.add(PreparedUri(uri, fileName, fileSize))
             }
 
@@ -155,9 +153,7 @@ suspend fun sendFileUriToPeer(
                 }
             }
 
-            if (fileSize <= 0) {
-                fileSize = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() } ?: 0L
-            }
+            if (fileSize <= 0) fileSize = measureUriSize(context, uri)
 
             withContext(Dispatchers.Main) {
                 onState(TransferProgressState.Requesting(peer.name, fileName))
@@ -369,3 +365,30 @@ fun shareFileWithSystem(context: Context, file: File) {
     }
 }
 
+/**
+ * Size of a content URI whose provider reports none. InputStream.available() is only what can
+ * be read without blocking, often 0 or a buffer size, so ask the descriptor and, failing that,
+ * count the bytes.
+ */
+internal fun measureUriSize(context: Context, uri: Uri): Long {
+    try {
+        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+            if (afd.length >= 0) return afd.length
+        }
+    } catch (_: Exception) {
+    }
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buf = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                total += n
+            }
+            total
+        } ?: 0L
+    } catch (_: Exception) {
+        0L
+    }
+}
