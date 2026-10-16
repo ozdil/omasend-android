@@ -80,6 +80,49 @@ class DiscoveryManager(private val context: Context) {
                 else -> IDLE_INTERVAL_MS
             }
         }
+
+        const val BEACON_MAGIC = "OMASEND_P2P"
+        private val BEACON_MAGIC_BYTES = BEACON_MAGIC.toByteArray(Charsets.UTF_8)
+        private val beaconJson = Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = true
+        }
+
+        /**
+         * Parses one received UDP datagram into a beacon, or returns null for anything that is
+         * not an OmaSend beacon.
+         *
+         * Beacons are JSON objects (`{"magic":"OMASEND_P2P","v":1,...}` from both the desktop's
+         * serde and Android's kotlinx serializer), so the magic string is never at byte 0. The
+         * cheap pre-filter therefore only checks that the magic occurs somewhere in the payload
+         * before paying for String/JSON allocation; the decoded `magic` field is then checked
+         * exactly.
+         */
+        fun parseBeacon(data: ByteArray, length: Int): P2pBeaconPacket? {
+            val len = length.coerceIn(0, data.size)
+            if (len <= BEACON_MAGIC_BYTES.size || !containsBytes(data, len, BEACON_MAGIC_BYTES)) return null
+            return try {
+                val beacon = beaconJson.decodeFromString(
+                    P2pBeaconPacket.serializer(),
+                    String(data, 0, len, Charsets.UTF_8)
+                )
+                beacon.takeIf { it.magic == BEACON_MAGIC }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun containsBytes(data: ByteArray, len: Int, needle: ByteArray): Boolean {
+            val last = len - needle.size
+            var i = 0
+            while (i <= last) {
+                var j = 0
+                while (j < needle.size && data[i + j] == needle[j]) j++
+                if (j == needle.size) return true
+                i++
+            }
+            return false
+        }
     }
 
     fun markActiveEvent(currentTimeMs: Long = System.currentTimeMillis()) {
@@ -644,72 +687,60 @@ class DiscoveryManager(private val context: Context) {
                 activeListenSocket = socket
                 val buffer = ByteArray(2048)
                 val packet = DatagramPacket(buffer, buffer.size)
-                val magicBytes = "OMASEND_P2P".toByteArray(Charsets.UTF_8)
 
                 while (isActive) {
                     try {
+                        // A reused DatagramPacket keeps the last received length; reset it so
+                        // a short packet does not truncate every later (longer) beacon.
+                        packet.setLength(buffer.size)
                         socket.receive(packet)
                         val packetAddr = packet.address
                         if (packetAddr == null || !NetworkUtils.isPrivateOrLocalAddress(packetAddr)) continue
 
-                        val length = packet.length
-                        // Early magic byte filtering to avoid heavy String & JSON allocation on stray network noise
-                        if (length > magicBytes.size) {
-                            var matchesMagic = true
-                            for (i in magicBytes.indices) {
-                                if (packet.data[i] != magicBytes[i]) {
-                                    matchesMagic = false
-                                    break
-                                }
-                            }
-                            if (!matchesMagic) continue
+                        val beacon = parseBeacon(packet.data, packet.length)
+                        if (beacon != null) {
+                            val myId = NetworkUtils.getDeviceId(context)
+                            val myIp = NetworkUtils.getLocalIpAddress()
+                            val myOmaId = getMyOmaId()
+                            val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
 
-                            val rawJson = String(packet.data, 0, length, Charsets.UTF_8)
-                            val beacon = json.decodeFromString<P2pBeaconPacket>(rawJson)
-                            if (beacon.magic == "OMASEND_P2P") {
-                                val myId = NetworkUtils.getDeviceId(context)
-                                val myIp = NetworkUtils.getLocalIpAddress()
-                                val myOmaId = getMyOmaId()
-                                val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
+                            val isSameOwner = myOmaId.isNotBlank() && peerOmaId.isNotBlank() &&
+                                OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
+                            val isSelfDevice = beacon.id == myId || (beacon.ip == myIp && beacon.id == myId)
 
-                                val isSameOwner = myOmaId.isNotBlank() && peerOmaId.isNotBlank() &&
-                                    OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
-                                val isSelfDevice = beacon.id == myId || (beacon.ip == myIp && beacon.id == myId)
-
-                                if (!isSelfDevice) {
-                                    // Remote peer notified OFFLINE
-                                    if (beacon.mode.equals("OFF", ignoreCase = true) || beacon.mode.equals("STOP", ignoreCase = true)) {
-                                        val removed = peerMap.remove(beacon.id) != null
-                                        if (removed) {
-                                            updatePeersFlow()
-                                        }
-                                        continue
+                            if (!isSelfDevice) {
+                                // Remote peer notified OFFLINE
+                                if (beacon.mode.equals("OFF", ignoreCase = true) || beacon.mode.equals("STOP", ignoreCase = true)) {
+                                    val removed = peerMap.remove(beacon.id) != null
+                                    if (removed) {
+                                        updatePeersFlow()
                                     }
-
-                                    val senderIp = packetAddr.hostAddress ?: beacon.ip
-                                    val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
-
-                                    // V2-SEC-03 interim fix: beacons are unauthenticated, so they must not
-                                    // overwrite the stored IP/name of a paired OmaID (traffic redirection).
-
-                                    val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
-                                    val peer = DiscoveredPeer(
-                                        id = beacon.id,
-                                        name = beacon.name,
-                                        ip = senderIp,
-                                        port = beacon.port,
-                                        transport = "LAN",
-                                        omaId = formattedPeerOma,
-                                        fingerprint = formattedPeerOma,
-                                        isTrusted = isTrustedPeer,
-                                        isSameOwner = isSameOwner,
-                                        lastSeen = System.currentTimeMillis(),
-                                        pk = beacon.pk.takeIf { io.omarchy.omasend.crypto.DeviceKey.decodePk(it) != null } ?: ""
-                                    )
-                                    peerMap[peer.id] = peer
-                                    markActiveEvent()
-                                    updatePeersFlow()
+                                    continue
                                 }
+
+                                val senderIp = packetAddr.hostAddress ?: beacon.ip
+                                val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
+
+                                // V2-SEC-03 interim fix: beacons are unauthenticated, so they must not
+                                // overwrite the stored IP/name of a paired OmaID (traffic redirection).
+
+                                val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
+                                val peer = DiscoveredPeer(
+                                    id = beacon.id,
+                                    name = beacon.name,
+                                    ip = senderIp,
+                                    port = beacon.port,
+                                    transport = "LAN",
+                                    omaId = formattedPeerOma,
+                                    fingerprint = formattedPeerOma,
+                                    isTrusted = isTrustedPeer,
+                                    isSameOwner = isSameOwner,
+                                    lastSeen = System.currentTimeMillis(),
+                                    pk = beacon.pk.takeIf { io.omarchy.omasend.crypto.DeviceKey.decodePk(it) != null } ?: ""
+                                )
+                                peerMap[peer.id] = peer
+                                markActiveEvent()
+                                updatePeersFlow()
                             }
                         }
                     } catch (_: java.net.SocketTimeoutException) {
