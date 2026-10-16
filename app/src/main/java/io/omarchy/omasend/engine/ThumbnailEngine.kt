@@ -19,16 +19,18 @@ object ThumbnailEngine {
     const val QUALITY = 75
     const val THUMBNAIL_PREFIX = "data:image/webp;base64,"
 
+    /** [hash] must be a 64-char hex content hash (throws otherwise; it names a file). */
     fun getThumbnailFile(context: Context, hash: String): File {
+        val h = ImageHash.require(hash)
         val cacheDir = File(context.cacheDir, "clipboard_images")
         if (!cacheDir.exists()) {
             cacheDir.mkdirs()
         }
-        return File(cacheDir, "${hash}_thumb.webp")
+        return File(cacheDir, "${h}_thumb.webp")
     }
 
     fun hasThumbnail(context: Context, hash: String): Boolean {
-        if (hash.isBlank()) return false
+        if (!ImageHash.isValid(hash)) return false
         val file = getThumbnailFile(context, hash)
         return file.exists() && file.length() > 0
     }
@@ -137,7 +139,7 @@ object ThumbnailEngine {
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs()
             }
-            val tempFile = File(cacheDir, "${hash}_thumb.webp.tmp")
+            val tempFile = File(cacheDir, "${thumbFile.name}.tmp")
             tempFile.writeBytes(webpBytes)
             tempFile.renameTo(thumbFile)
             thumbFile.setLastModified(System.currentTimeMillis())

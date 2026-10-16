@@ -450,10 +450,13 @@ class OmaSendClient(private val context: Context) {
         if (!isAllowedTarget(targetIp, targetOmaId, hasActiveToken = true)) {
             return Result.failure(SecurityException("Target IP is outside private network scope"))
         }
+        // The hash comes from the network: only a 64-char hex digest may go into the URL.
+        val cleanHash = io.omarchy.omasend.engine.ImageHash.normalize(hash)
+            ?: return Result.failure(IllegalArgumentException("Invalid image hash"))
         return try {
             val myOmaId = getLocalOmaId()
             val reqBuilder = Request.Builder()
-                .url("http://$targetIp:$targetPort/api/p2p/clipboard/image?hash=$hash")
+                .url("http://$targetIp:$targetPort/api/p2p/clipboard/image?hash=$cleanHash")
                 .get()
             if (myOmaId.isNotBlank()) {
                 reqBuilder.header("X-OmaSend-OmaID", myOmaId)
@@ -467,6 +470,9 @@ class OmaSendClient(private val context: Context) {
                 val bytes = body.bytes()
                 if (bytes.size > 10 * 1024 * 1024) {
                     return Result.failure(Exception("Image exceeds 10 MiB limit"))
+                }
+                if (!io.omarchy.omasend.engine.ImageHash.matches(bytes, cleanHash)) {
+                    return Result.failure(SecurityException("Clipboard image does not match its hash"))
                 }
                 Result.success(bytes)
             }
