@@ -63,9 +63,11 @@ class ClipboardVault private constructor(private val context: Context) {
         evictLruCacheIfNeeded()
     }
 
+    /** [hash] must be a 64-char hex content hash (throws otherwise; it names a file). */
     fun getImageFile(hash: String): File {
+        val h = io.omarchy.omasend.engine.ImageHash.require(hash)
         if (!imageCacheDir.exists()) imageCacheDir.mkdirs()
-        return File(imageCacheDir, "$hash.png")
+        return File(imageCacheDir, "$h.png")
     }
 
     fun getThumbnailFile(hash: String): File {
@@ -77,7 +79,7 @@ class ClipboardVault private constructor(private val context: Context) {
     }
 
     fun hasImage(hash: String): Boolean {
-        if (hash.isBlank()) return false
+        if (!io.omarchy.omasend.engine.ImageHash.isValid(hash)) return false
         val file = getImageFile(hash)
         return file.exists() && file.length() > 0
     }
@@ -111,15 +113,16 @@ class ClipboardVault private constructor(private val context: Context) {
     }
 
     fun saveImageBytes(hash: String, bytes: ByteArray): File {
+        val h = io.omarchy.omasend.engine.ImageHash.require(hash)
         if (!imageCacheDir.exists()) imageCacheDir.mkdirs()
-        val file = File(imageCacheDir, "$hash.png")
-        val tmpFile = File(imageCacheDir, "$hash.tmp")
+        val file = File(imageCacheDir, "$h.png")
+        val tmpFile = File(imageCacheDir, "$h.tmp")
         tmpFile.writeBytes(bytes)
         tmpFile.renameTo(file)
         file.setLastModified(System.currentTimeMillis())
 
         try {
-            io.omarchy.omasend.engine.ThumbnailEngine.generateAndCacheThumbnail(context, bytes, hash)
+            io.omarchy.omasend.engine.ThumbnailEngine.generateAndCacheThumbnail(context, bytes, h)
         } catch (_: Exception) {}
 
         evictLruCacheIfNeeded()
@@ -154,6 +157,20 @@ class ClipboardVault private constructor(private val context: Context) {
             recentHashRing.add(hash)
         }
         _lastReceivedHash.set(hash)
+    }
+
+    /**
+     * Atomically records [hash] and returns true if it was not known yet. MainActivity and the
+     * foreground service both listen for clipboard changes; with a separate check-then-record the
+     * same clip could be processed (and pushed to peers) twice.
+     */
+    fun recordIfNew(hash: String): Boolean {
+        if (hash.isBlank()) return false
+        synchronized(hashRingLock) {
+            if (recentHashRing.contains(hash)) return false
+            recordHash(hash)
+            return true
+        }
     }
 
     fun isKnownHash(hash: String): Boolean {
@@ -233,21 +250,23 @@ class ClipboardVault private constructor(private val context: Context) {
         client: io.omarchy.omasend.network.OmaSendClient? = null
     ): ClipboardEntry? {
         if (payload.content_type == "image") {
-            val hash = payload.image_hash ?: return null
+            // The hash names files and URLs: reject anything that is not a 64-char hex digest.
+            val hash = io.omarchy.omasend.engine.ImageHash.normalize(payload.image_hash) ?: return null
             recordHash(hash)
 
-            // 1. Direct write if payload contains image data (< 512 KiB)
+            // 1. Direct write if payload contains image data (< 512 KiB). Bytes are stored under
+            // the hash only if they actually hash to it (otherwise the lazy fetch below runs).
             if (!payload.image_data_base64.isNullOrBlank()) {
                 try {
                     val bytes = io.omarchy.omasend.engine.ThumbnailEngine.decodeBase64(payload.image_data_base64)
-                    if (bytes != null && bytes.isNotEmpty()) {
+                    if (bytes != null && bytes.isNotEmpty() && io.omarchy.omasend.engine.ImageHash.matches(bytes, hash)) {
                         saveImageBytes(hash, bytes)
                     }
                 } catch (_: Exception) {}
             } else if (payload.image_size != null && payload.image_size <= 512 * 1024L && !payload.thumbnail_base64.isNullOrBlank()) {
                 try {
                     val bytes = io.omarchy.omasend.engine.ThumbnailEngine.decodeBase64(payload.thumbnail_base64)
-                    if (bytes != null && bytes.isNotEmpty()) {
+                    if (bytes != null && bytes.isNotEmpty() && io.omarchy.omasend.engine.ImageHash.matches(bytes, hash)) {
                         saveImageBytes(hash, bytes)
                     }
                 } catch (_: Exception) {}
@@ -273,6 +292,7 @@ class ClipboardVault private constructor(private val context: Context) {
             if (!hasImage(hash) && client != null && peerIp.isNotBlank() && peerPort > 0) {
                 scope.launch {
                     try {
+                        // fetchClipboardImage verifies the bytes against the hash.
                         val fetchResult = client.fetchClipboardImage(peerIp, peerPort, hash)
                         fetchResult.getOrNull()?.let { bytes ->
                             saveImageBytes(hash, bytes)
@@ -308,6 +328,7 @@ class ClipboardVault private constructor(private val context: Context) {
         peerPort: Int,
         hash: String
     ): File? {
+        if (!io.omarchy.omasend.engine.ImageHash.isValid(hash)) return null
         if (hasImage(hash)) {
             val file = getImageFile(hash)
             file.setLastModified(System.currentTimeMillis())
@@ -389,11 +410,10 @@ class ClipboardVault private constructor(private val context: Context) {
             }
 
             val hash = computeHash(text)
-            if (isKnownHash(hash)) {
+            if (!recordIfNew(hash)) {
                 return
             }
 
-            recordHash(hash)
             val deviceName = NetworkUtils.getDeviceName(context)
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 

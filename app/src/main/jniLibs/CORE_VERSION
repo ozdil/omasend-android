@@ -1,0 +1,13 @@
+# Provenance of the prebuilt omasend-core libraries in this directory.
+# Update this file whenever a libomasend_core.so (or uniffi/omasend_core/omasend_core.kt) changes.
+# Verify with: (cd app/src/main/jniLibs && sha256sum -c <(grep -E '^[0-9a-f]{64}  ' CORE_VERSION))
+
+source_repo: omarchy-omasend (desktop repository), crate in core/, built with core/build-android.sh
+source_commit: 5b4479cacd66c750d27910b6901ad6074820e01b
+source_commit_subject: core: retry the well-known QUIC port before falling back to an ephemeral one
+bindings: app/src/main/java/uniffi/omasend_core/omasend_core.kt (UniFFI, same commit)
+reproducible: no (built by hand; toolchain not pinned, no --remap-path-prefix)
+
+0f21b1f2a84817df39f9d678cc165382b24051d42fa544212cb3a72dab574ff7  arm64-v8a/libomasend_core.so
+8275ef348adc6d0d3ef93ca5084d3afe2c7c5094afa1c1f034e2917792094316  armeabi-v7a/libomasend_core.so
+d0450ae925b68b5472c2dd89c35f148d78a81361791f734e000227835f3352c4  x86_64/libomasend_core.so
