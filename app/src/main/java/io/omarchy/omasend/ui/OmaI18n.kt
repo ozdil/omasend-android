@@ -77,6 +77,7 @@ object OmaI18n {
         "own_device_off" to mapOf("tr" to "Başkasının cihazı: her aktarım onay ister.", "en" to "Someone else's device: every transfer needs approval."),
         "pair_failed" to mapOf("tr" to "Eşleşme başarısız: %s", "en" to "Pairing failed: %s"),
         "paired_with" to mapOf("tr" to "Eşleşti: %s", "en" to "Paired with %s"),
+        "pairing_in_progress" to mapOf("tr" to "QR okundu, eşleştiriliyor…", "en" to "QR code read, pairing…"),
         "legacy_omaid_added" to mapOf("tr" to "Eski sürüm OmaID kodu eklendi. Şifreli aktarım için cihazı yeni QR koduyla eşleştir.", "en" to "Legacy OmaID code added. Pair with the new QR code for encrypted transfers."),
         "ip_address" to mapOf("tr" to "IP adresi (ör. 192.168.1.50)", "en" to "IP address (e.g. 192.168.1.50)"),
         "port" to mapOf("tr" to "Port", "en" to "Port"),
