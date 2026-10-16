@@ -15,8 +15,14 @@ import io.omarchy.omasend.network.OmaSendServer
 import io.omarchy.omasend.network.WanDiscoveryEngine
 import io.omarchy.omasend.repository.ClipboardVault
 import io.omarchy.omasend.ui.haptics.OmaHapticController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class OmaSendApp : Application() {
+    /** Process-wide background scope for start-up work that must not block the main thread. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     lateinit var discoveryManager: DiscoveryManager
         private set
     lateinit var server: OmaSendServer
@@ -41,6 +47,7 @@ class OmaSendApp : Application() {
         instance = this
 
         createNotificationChannels()
+        io.omarchy.omasend.network.NetworkUtils.init(this)
 
         soundEngine = OmaSoundEngine(this)
         hapticController = OmaHapticController(this)
@@ -72,8 +79,10 @@ class OmaSendApp : Application() {
         }
 
         server.start()
-        // Phase 2: encrypted QUIC transport for QR-paired devices (falls back to HTTP if unavailable).
-        io.omarchy.omasend.network.CoreNode.start(this)
+        // Phase 2: encrypted QUIC transport for QR-paired devices. Started off the main thread:
+        // the device key needs the Android Keystore and the core retries a busy UDP port for
+        // several seconds (ANR risk). Users of CoreNode.node handle "not started yet".
+        io.omarchy.omasend.network.CoreNode.startAsync(this, appScope)
         discoveryManager.start()
         wanDiscoveryEngine.start()
     }

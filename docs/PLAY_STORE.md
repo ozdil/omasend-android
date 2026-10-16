@@ -30,15 +30,15 @@ High-performance local peer-to-peer file transfer and Wayland clipboard sync.
 **Full Description (Max 4000 characters):**
 OmaSend is a high-performance, privacy-first peer-to-peer file and clipboard sharing application built for local networks. It provides seamless cross-platform parity between Omarchy Linux (and other modern Linux distributions) and Android devices.
 
-OmaSend operates strictly within your local area network (LAN). It does not rely on third-party cloud servers, user accounts, remote databases, or external intermediaries. Your files and clipboard content travel directly from device to device at full local network speeds.
+OmaSend works within your local area network (LAN). It has no user accounts, remote databases or relay servers: your files and clipboard content travel directly from device to device at full local network speeds. The only outside contact is a periodic STUN request (see "Network use" below), which carries no file or clipboard data.
 
 KEY CAPABILITIES
 
 1. Instant Local Peer Discovery:
-Using automated UDP broadcast beacons on port 53317, OmaSend discovers nearby devices instantly without manual IP entry or Bluetooth pairing delays.
+Using automated UDP broadcast beacons on port 53317, OmaSend discovers nearby devices without manual IP entry. Devices can also be paired by scanning a QR code with the camera.
 
 2. High-Speed File Streaming:
-Transfer photos, documents, archives, and media directly between your Android device and Linux workstations with zero compression, zero size limits, and real-time streaming progress tracking.
+Transfer photos, documents, archives, and media directly between your Android device and Linux workstations with no compression, up to 10 GiB per file, and real-time progress tracking. QR-paired devices use an end-to-end encrypted QUIC connection (UDP port 53318).
 
 3. Bi-Directional Clipboard Synchronization:
 Share text snippets, URLs, code blocks, and tokens seamlessly between your Android clipboard and Linux Wayland desktop environment with a single tap.
@@ -51,10 +51,10 @@ Monitor nearby devices and incoming transfers effortlessly with a low-power back
 
 PRIVACY AND ARCHITECTURE GUARANTEES
 
-- Zero Cloud Dependency: All transmissions are direct socket-to-socket connections over your local Wi-Fi or Ethernet network.
+- No Cloud Relay: All transfers are direct connections over your local Wi-Fi or Ethernet network.
 - Zero Telemetry: OmaSend collects no analytics, no crash metrics, no device identifiers, and no user tracking data.
 - Open Protocol Parity: Full wire compatibility with the official OmaSend Linux engine and desktop plugin.
-- Strict Permission Discipline: Requests only the essential network and notification permissions required for direct transfers.
+- Strict Permission Discipline: Requests only the network, notification and camera (QR pairing) permissions it needs.
 
 OmaSend is designed for users who demand speed, reliability, and absolute privacy on their local networks.
 
@@ -68,15 +68,15 @@ Yerel ağ üzerinden hızlı P2P dosya transferi ve Wayland pano eşitleme.
 **Tam Açıklama (En fazla 4000 karakter):**
 OmaSend, yerel ağlar için geliştirilmiş yüksek performanslı ve gizlilik odaklı bir eşler arası (P2P) dosya ve pano paylaşım uygulamasıdır. Omarchy Linux ve modern Linux masaüstü ortamları ile Android cihazlar arasında doğrudan bağlantı sağlar.
 
-OmaSend tamamen yerel ağınız (LAN) içerisinde çalışır. Üçüncü taraf bulut sunucularına, kullanıcı hesaplarına, uzak veritabanlarına veya aracılara ihtiyaç duymaz. Dosyalarınız ve pano içerikleriniz cihazlar arasında doğrudan yerel ağ hızında aktarılır.
+OmaSend yerel ağınız (LAN) içinde çalışır. Kullanıcı hesabı, uzak veritabanı veya aktarma sunucusu yoktur: dosyalarınız ve pano içerikleriniz cihazlar arasında doğrudan yerel ağ hızında aktarılır. Dışarıyla tek temas, dosya veya pano verisi taşımayan periyodik bir STUN isteğidir (aşağıda "Ağ kullanımı" bölümüne bakın).
 
 TEMEL ÖZELLİKLER
 
 1. Anında Yerel Eş Keşfi:
-53317 portu üzerindeki otomatik UDP yayın sinyalleri sayesinde OmaSend, IP adresi girmeye veya Bluetooth eşleştirmesine gerek kalmadan yakındaki cihazları saniyeler içinde bulur.
+53317 portu üzerindeki otomatik UDP yayın sinyalleri sayesinde OmaSend, IP adresi girmeye gerek kalmadan yakındaki cihazları bulur. Cihazlar kamerayla QR kod okutularak da eşleştirilebilir.
 
 2. Yüksek Hızlı Dosya Aktarımı:
-Fotoğraf, video, belge ve arşiv dosyalarını Android cihazınız ile Linux bilgisayarınız arasında sıkıştırma olmadan, boyut sınırı olmaksızın ve anlık ilerleme takibiyle aktarın.
+Fotoğraf, video, belge ve arşiv dosyalarını Android cihazınız ile Linux bilgisayarınız arasında sıkıştırma olmadan, dosya başına 10 GiB'a kadar ve anlık ilerleme takibiyle aktarın. QR ile eşleşmiş cihazlar uçtan uca şifreli QUIC bağlantısı (UDP 53318 portu) kullanır.
 
 3. Çift Yönlü Pano (Clipboard) Eşitleme:
 Metinleri, web adreslerini, kod parçacıklarını ve notları tek dokunuşla Android panonuz ile Linux Wayland masaüstünüz arasında eşitleyin.
@@ -89,10 +89,10 @@ Düşük güç tüketimli arka plan servisi ve modern radar arayüzü ile ağdak
 
 GİZLİLİK VE MİMARİ İLKELER
 
-- Sıfır Bulut Bağımlılığı: Tüm aktarımlar yerel Wi-Fi veya Ethernet ağınız üzerinden doğrudan soket bağlantısıyla yapılır.
+- Bulut Aktarıcısı Yok: Tüm aktarımlar yerel Wi-Fi veya Ethernet ağınız üzerinden doğrudan bağlantıyla yapılır.
 - Sıfır Telemetri: OmaSend hiçbir analiz verisi, çökme raporu, cihaz kimliği veya kullanıcı izleme verisi toplamaz.
 - Açık Protokol Uyumluluğu: Resmi OmaSend Linux motoru ve masaüstü eklentisiyle tam protokol uyumluluğu.
-- Sıkı İzin Yönetimi: Yalnızca doğrudan aktarım için zorunlu olan yerel ağ ve bildirim izinlerini talep eder.
+- Sıkı İzin Yönetimi: Yalnızca gerekli ağ, bildirim ve kamera (QR eşleştirme) izinlerini talep eder.
 
 OmaSend, yerel ağlarında hız, kararlılık ve mutlak gizlilik isteyen kullanıcılar için tasarlanmıştır.
 
@@ -114,11 +114,21 @@ Google Play Console'da "Data safety" (Veri güvenliği) adımı için resmi yan�
 ---
 
 ## 4. Permissions & Justifications
- 
-- `android.permission.INTERNET`: Required to create local HTTP/TCP sockets and stream files across the local Wi-Fi network.
-- `android.permission.ACCESS_NETWORK_STATE` & `ACCESS_WIFI_STATE`: Required to verify Wi-Fi connectivity and bind to local network interfaces.
-- `android.permission.CHANGE_WIFI_MULTICAST_STATE`: Required to receive UDP multicast beacons for local peer discovery on port 53317.
-- `android.permission.FOREGROUND_SERVICE` & `FOREGROUND_SERVICE_DATA_SYNC`: Required to maintain reliable background peer discovery and receive incoming files when screen is locked or app is in background.
-- `android.permission.POST_NOTIFICATIONS`: Required on Android 13+ to show persistent service status and transfer progress indicators.
-- `android.permission.BLUETOOTH`, `BLUETOOTH_ADMIN`, `BLUETOOTH_CONNECT`: Required to support alternative direct Bluetooth file sharing when local Wi-Fi networks have AP client isolation or are unavailable.
 
+Matches `app/src/main/AndroidManifest.xml`. OmaSend declares no Bluetooth or location permissions.
+
+- `android.permission.INTERNET`: Local HTTP/TCP sockets (port 53317) and the QUIC transport (UDP port 53318) for transfers on the local network.
+- `android.permission.ACCESS_NETWORK_STATE` & `ACCESS_WIFI_STATE`: Detect Wi-Fi/Ethernet connectivity and pick the LAN address to advertise.
+- `android.permission.CHANGE_WIFI_MULTICAST_STATE`: Receive UDP broadcast/multicast discovery beacons on port 53317.
+- `android.permission.WAKE_LOCK`: Keep the CPU and Wi-Fi awake while a transfer is streaming.
+- `android.permission.FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` & `FOREGROUND_SERVICE_CONNECTED_DEVICE`: The foreground service (`foregroundServiceType="dataSync|connectedDevice"`) keeps the device reachable by nearby devices and receives incoming files while the app is in the background.
+- `android.permission.POST_NOTIFICATIONS`: Android 13+ service status, incoming-transfer and transfer-result notifications.
+- `android.permission.VIBRATE`: Haptic feedback for sent/received items.
+- `android.permission.CAMERA` (camera hardware optional): Scan pairing / OmaID QR codes. Frames are decoded on the device and never stored or sent.
+- `android.permission.READ_EXTERNAL_STORAGE` (max SDK 32) & `WRITE_EXTERNAL_STORAGE` (max SDK 28): Save received files to Downloads/OmaSend on older Android versions; newer versions use MediaStore without a permission.
+
+## 5. Network Use (for the Data safety form and the description)
+
+- **LAN only for content:** files and clipboard content are sent only to devices on the local network (legacy HTTP on TCP 53317, or end-to-end encrypted QUIC on UDP 53318 for QR-paired devices). There is no relay or cloud storage.
+- **Limits:** up to 10 GiB per file.
+- **STUN:** while the app runs, it sends a STUN Binding Request about every 30 seconds to `stun.l.google.com:19302`, `stun1.l.google.com:19302` or `stun.cloudflare.com:3478` to learn its public address. These servers see the device's public IP address; no file, clipboard or identity data is sent. Claims such as "zero cloud contact" must not be used while this is enabled.

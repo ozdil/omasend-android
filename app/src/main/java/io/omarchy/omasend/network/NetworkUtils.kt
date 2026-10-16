@@ -1,6 +1,9 @@
 package io.omarchy.omasend.network
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -9,9 +12,27 @@ import java.util.UUID
 object NetworkUtils {
     const val PORT: Int = 53317
 
+    @Volatile
+    private var appContext: Context? = null
+
+    /** Lets [getLocalIpAddress] ask ConnectivityManager for the LAN network (call once at start-up). */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    /**
+     * IPv4 address peers on the LAN can reach us at (beacons, QR codes).
+     *
+     * A13: prefers the address of the Wi-Fi/Ethernet network from ConnectivityManager, so the
+     * cellular interface (rmnet*, ccmni*) is never advertised while Wi-Fi is up. Falls back to
+     * scanning interfaces (e.g. when this phone is the hotspot), with LAN-looking names first
+     * and cellular ones last.
+     */
     fun getLocalIpAddress(): String {
+        lanIpv4FromConnectivity()?.let { return it }
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1"
+            val all = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1"
+            val interfaces = all.toList().sortedBy { interfaceRank(it.name) }
             for (iface in interfaces) {
                 if (iface.isLoopback || !iface.isUp) continue
                 val name = iface.name.lowercase()
@@ -29,6 +50,44 @@ object NetworkUtils {
         } catch (_: Exception) {
         }
         return "127.0.0.1"
+    }
+
+    /** 0 = LAN (Wi-Fi, Ethernet, hotspot), 1 = unknown, 2 = cellular data. Lower is preferred. */
+    fun interfaceRank(name: String?): Int {
+        val n = name?.lowercase() ?: return 1
+        val lan = listOf("wlan", "eth", "ap", "swlan", "softap", "wifi", "en")
+        val cellular = listOf("rmnet", "ccmni", "pdp", "clat", "v4-", "seth", "rev_rmnet", "qmi", "wwan")
+        return when {
+            cellular.any { n.startsWith(it) } -> 2
+            lan.any { n.startsWith(it) } -> 0
+            else -> 1
+        }
+    }
+
+    private fun lanIpv4FromConnectivity(): String? {
+        val ctx = appContext ?: return null
+        return try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
+            val networks = LinkedHashSet<Network>()
+            cm.activeNetwork?.let { networks.add(it) }
+            @Suppress("DEPRECATION")
+            cm.allNetworks.forEach { networks.add(it) }
+            for (net in networks) {
+                val caps = cm.getNetworkCapabilities(net) ?: continue
+                if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                ) continue
+                val lp = cm.getLinkProperties(net) ?: continue
+                val v4 = lp.linkAddresses
+                    .map { it.address }
+                    .firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
+                    ?.hostAddress
+                if (!v4.isNullOrBlank()) return v4
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun getDeviceId(context: Context): String {
@@ -95,11 +154,14 @@ object NetworkUtils {
     }
 
     /**
-     * Validates an IPv4 or loopback string against RFC 1918, RFC 3927 link-local, or loopback.
+     * Validates an IP string (optionally "ip:port", "[v6]:port" or with a "%zone") against
+     * RFC 1918, RFC 3927 link-local, RFC 6598 shared space (100.64.0.0/10), loopback, and for
+     * IPv6 link-local (fe80::/10), unique-local (fc00::/7), loopback and IPv4-mapped addresses.
      */
     fun isPrivateOrLocalIp(ip: String): Boolean {
         val raw = ip.trim()
         if (raw == "::1" || raw == "localhost" || raw == "127.0.0.1") return true
+        if (raw.count { it == ':' } >= 2) return isPrivateOrLocalIpv6(raw)
         val cleanIp = raw.substringBefore(':').trim()
         if (cleanIp == "127.0.0.1" || cleanIp == "localhost" || cleanIp == "::1") return true
         val parts = cleanIp.split('.')
@@ -117,7 +179,29 @@ object NetworkUtils {
         if (octets[0] == 169 && octets[1] == 254) return true
         // 127.0.0.0/8 (Loopback)
         if (octets[0] == 127) return true
+        // 100.64.0.0/10 (RFC 6598 shared address space: carrier NAT, Tailscale)
+        if (octets[0] == 100 && octets[1] in 64..127) return true
 
+        return false
+    }
+
+    private fun isPrivateOrLocalIpv6(raw: String): Boolean {
+        var host = raw
+        if (host.startsWith("[")) host = host.substringAfter('[').substringBefore(']')
+        host = host.substringBefore('%').trim().lowercase()
+        if (host.isEmpty()) return false
+        if (host == "::1" || host == "0:0:0:0:0:0:0:1") return true
+        // IPv4-mapped (::ffff:a.b.c.d)
+        if (host.startsWith("::ffff:") && host.count { it == '.' } == 3) {
+            return isPrivateOrLocalIp(host.removePrefix("::ffff:"))
+        }
+        if (host.startsWith(":")) return false
+        val first = host.substringBefore(':').toIntOrNull(16) ?: return false
+        if (first !in 0..0xffff) return false
+        // fe80::/10 link-local
+        if ((first and 0xffc0) == 0xfe80) return true
+        // fc00::/7 unique local
+        if ((first and 0xfe00) == 0xfc00) return true
         return false
     }
 
