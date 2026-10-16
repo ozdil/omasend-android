@@ -96,8 +96,21 @@ fun OmaQrScannerDialog(
         onDispose {
             try {
                 cameraInstance?.cameraControl?.enableTorch(false)
-                analysisExecutor.shutdown()
             } catch (_: Exception) {}
+            // The use cases are bound to the Activity's lifecycle, which outlives this dialog:
+            // unbind them so the camera (and its privacy indicator) is released on close. The
+            // analysis executor is shut down only after unbinding so no frame hits a dead executor.
+            try {
+                val providerFuture = ProcessCameraProvider.getInstance(context)
+                providerFuture.addListener({
+                    try {
+                        providerFuture.get().unbindAll()
+                    } catch (_: Exception) {}
+                    analysisExecutor.shutdown()
+                }, ContextCompat.getMainExecutor(context))
+            } catch (_: Exception) {
+                analysisExecutor.shutdown()
+            }
         }
     }
 
