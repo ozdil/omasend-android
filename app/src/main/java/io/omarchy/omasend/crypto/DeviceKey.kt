@@ -354,19 +354,26 @@ object DeviceKey {
         return r
     }
 
-    /** [headers] must use lowercase names. Unknown keys are reported as Absent (legacy rules apply). */
+    /**
+     * [headers] must use lowercase names.
+     *
+     * PROTOCOL_V2.md: a key that was never paired gets the legacy rules (Absent), whatever its
+     * timestamp, nonce or signature look like; only a known key with a bad ts/nonce/signature or a
+     * replayed nonce is Rejected (401). The trust lookup therefore runs before any header checks.
+     */
     fun verifyRequest(lookup: (String) -> TrustedKey?, headers: Map<String, String>, method: String, pathAndQuery: String, bodyTag: String): AuthResult {
         val pk = headers["x-omasend-pk"]
         val ts = headers["x-omasend-ts"]
         val nonce = headers["x-omasend-nonce"]
         val sig = headers["x-omasend-sig"]
         if (pk == null && sig == null) return AuthResult.Absent
-        if (pk == null || ts == null || nonce == null || sig == null) return AuthResult.Rejected("Incomplete signature headers")
+        if (pk == null) return AuthResult.Rejected("Incomplete signature headers")
+        val trusted = lookup(pk.trim()) ?: return AuthResult.Absent
+        if (ts == null || nonce == null || sig == null) return AuthResult.Rejected("Incomplete signature headers")
         val tsVal = ts.trim().toLongOrNull() ?: return AuthResult.Rejected("Bad timestamp")
         val now = nowSecs()
         if (kotlin.math.abs(tsVal - now) > MAX_CLOCK_SKEW_SECS) return AuthResult.Rejected("Timestamp outside allowed window")
         if (nonce.length != 32 || !nonce.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) return AuthResult.Rejected("Bad nonce")
-        val trusted = lookup(pk.trim()) ?: return AuthResult.Absent
         val vk = decodePk(trusted.pk) ?: return AuthResult.Rejected("Corrupt stored key")
         if (!verifyB64(vk, canonical(method, pathAndQuery, tsVal, nonce, bodyTag).toByteArray(), sig)) return AuthResult.Rejected("Invalid signature")
         seenNonces.entries.removeIf { it.value <= now }
