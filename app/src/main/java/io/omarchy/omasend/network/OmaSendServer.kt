@@ -55,21 +55,55 @@ class OmaSendServer(private val context: Context) {
     private fun v2Verify(headers: Map<String, String>, method: String, pathAndQuery: String, bodyTag: String, peerIp: String) =
         DeviceKey.verifyRequest(trustStore, headers, method, pathAndQuery, bodyTag, peerIp)
 
-    private fun readBodyBounded(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): ByteArray? {
-        if (contentLength < 0 || contentLength > max) return null
+    private sealed class BodyResult {
+        class Ok(val bytes: ByteArray) : BodyResult()
+        /** Missing, empty or larger than allowed. */
+        object Invalid : BodyResult()
+        object TimedOut : BodyResult()
+        /** The peer closed the connection before Content-Length bytes arrived. */
+        object Incomplete : BodyResult()
+    }
+
+    /** Reads exactly [contentLength] (1..[max]) bytes before the monotonic [deadlineMs]. */
+    private fun readBody(input: InputStream, contentLength: Long, max: Long, deadlineMs: Long): BodyResult {
+        if (contentLength <= 0 || contentLength > max) return BodyResult.Invalid
         val bytes = ByteArray(contentLength.toInt())
         var total = 0
         while (total < bytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) return null
+            if (System.currentTimeMillis() > deadlineMs) return BodyResult.TimedOut
             val r = try {
                 input.read(bytes, total, bytes.size - total)
             } catch (_: java.net.SocketTimeoutException) {
                 continue
             }
-            if (r == -1) return null
+            if (r == -1) return BodyResult.Incomplete
             total += r
         }
-        return bytes
+        return BodyResult.Ok(bytes)
+    }
+
+    /** [readBody] for control endpoints: on failure sends the error response and returns null. */
+    private fun readBodyOrRespond(
+        input: InputStream,
+        output: OutputStream,
+        contentLength: Long,
+        max: Long,
+        deadlineMs: Long,
+        timeoutMessage: String = "Request body timed out"
+    ): ByteArray? = when (val r = readBody(input, contentLength, max, deadlineMs)) {
+        is BodyResult.Ok -> r.bytes
+        BodyResult.Invalid -> {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
+            null
+        }
+        BodyResult.TimedOut -> {
+            sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"$timeoutMessage\"}")
+            null
+        }
+        BodyResult.Incomplete -> {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
+            null
+        }
     }
 
     var onIncomingTransferPrompt: ((IncomingTransferPrompt) -> Unit)? = null
@@ -375,34 +409,7 @@ class OmaSendServer(private val context: Context) {
         deadlineMs: Long,
         pathAndQuery: String = "/api/p2p/request"
     ) {
-        if (contentLength <= 0 || contentLength > MAX_CONTROL_BODY) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
-        val bodyBytes = ByteArray(contentLength.toInt())
-        var totalRead = 0
-        while (totalRead < bodyBytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) {
-                sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Request body timed out\"}")
-                return
-            }
-            val r = try {
-                input.read(bodyBytes, totalRead, bodyBytes.size - totalRead)
-            } catch (_: java.net.SocketTimeoutException) {
-                if (System.currentTimeMillis() > deadlineMs) {
-                    sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Request body timed out\"}")
-                    return
-                }
-                continue
-            }
-            if (r == -1) break
-            totalRead += r
-        }
-
-        if (totalRead < bodyBytes.size) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
-            return
-        }
+        val bodyBytes = readBodyOrRespond(input, output, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs) ?: return
 
         try {
             val bodyJson = String(bodyBytes, Charsets.UTF_8)
@@ -572,11 +579,7 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handlePairV2(input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
-        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
-        if (body == null) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
+        val body = readBodyOrRespond(input, output, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs) ?: return
         val obj = try {
             json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
         } catch (_: Exception) {
@@ -653,35 +656,9 @@ class OmaSendServer(private val context: Context) {
         }
 
         // 2. Monotonic body reading
-        if (contentLength <= 0 || contentLength > MAX_CLIPBOARD_BODY) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
-            return
-        }
-
-        val bodyBytes = ByteArray(contentLength.toInt())
-        var totalRead = 0
-        while (totalRead < bodyBytes.size) {
-            if (System.currentTimeMillis() > deadlineMs) {
-                sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Clipboard read timed out\"}")
-                return
-            }
-            val r = try {
-                input.read(bodyBytes, totalRead, bodyBytes.size - totalRead)
-            } catch (_: java.net.SocketTimeoutException) {
-                if (System.currentTimeMillis() > deadlineMs) {
-                    sendResponse(output, 408, "Request Timeout", "application/json", "{\"error\":\"Clipboard read timed out\"}")
-                    return
-                }
-                continue
-            }
-            if (r == -1) break
-            totalRead += r
-        }
-
-        if (totalRead < bodyBytes.size) {
-            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Incomplete payload\"}")
-            return
-        }
+        val bodyBytes = readBodyOrRespond(
+            input, output, contentLength, MAX_CLIPBOARD_BODY.toLong(), deadlineMs, "Clipboard read timed out"
+        ) ?: return
 
         val bodyJson = String(bodyBytes, Charsets.UTF_8)
         val payload = try {
