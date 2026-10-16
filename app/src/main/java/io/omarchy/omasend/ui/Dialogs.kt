@@ -106,7 +106,6 @@ fun TransferStatusCard(
                 is TransferProgressState.Error -> {
                     title = state.message; subtitle = null; running = false
                 }
-                else -> return@Column
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
