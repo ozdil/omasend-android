@@ -377,6 +377,7 @@ fun RadarScreen(
             onDismissRequest = { showQrScannerDialog = false },
             onPairUriScanned = { uri ->
                 showQrScannerDialog = false
+                Toast.makeText(context, OmaI18n.t("pairing_in_progress"), Toast.LENGTH_SHORT).show()
                 scope.launch {
                     val result = withContext(Dispatchers.IO) { app.client.pairWithUri(uri) }
                     result.onSuccess { k ->
