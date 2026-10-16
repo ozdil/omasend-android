@@ -112,4 +112,46 @@ class OmaLinkTest {
         assertTrue(OmaLink.open(rk.boxKey, "I", sealed).isSuccess)
         assertTrue(OmaLink.open(rk.boxKey, "R", sealed).isFailure)
     }
+
+    private fun own(id: DeviceKey.Identity, name: String) = DeviceKey.TrustedKey(
+        pk = id.publicB64, device_id = id.deviceId, name = name, ip = "192.168.1.5", port = 53317, own_device = true, added_at = 1
+    )
+
+    @Test
+    fun rosterJoinsDevicesAndRevocationSpreads() {
+        val a = DeviceKey.Identity(ByteArray(32) { 11 })
+        val b = DeviceKey.Identity(ByteArray(32) { 12 })
+        val c = DeviceKey.Identity(ByteArray(32) { 13 })
+        val sender = own(a, "A")
+        val body = OmaLink.rosterBody(a, "A", 53317, 53318, listOf(own(b, "B"), own(c, "C")), emptyList())
+
+        val plan = OmaLink.planRoster(b.publicB64, sender, "192.168.1.9", body, emptyList(), listOf(sender), 100).getOrThrow()
+        assertEquals(listOf("C"), plan.added)
+        assertEquals(setOf(a.publicB64, c.publicB64), plan.upsert.map { it.pk }.toSet())
+        assertEquals("192.168.1.9", plan.upsert.first { it.pk == a.publicB64 }.ip)
+        assertTrue(plan.upsert.all { it.own_device })
+        assertTrue(!plan.rotate && !plan.selfRevoked)
+
+        // A removes C: B drops it, rotates its number and never re-adds it.
+        val afterRevoke = OmaLink.rosterBody(a, "A", 53317, 53318, listOf(own(b, "B")), listOf(c.publicB64))
+        val existing = listOf(sender, own(c, "C"))
+        val p2 = OmaLink.planRoster(b.publicB64, sender, "192.168.1.9", afterRevoke, emptyList(), existing, 100).getOrThrow()
+        assertEquals(listOf(c.publicB64), p2.remove)
+        assertTrue(p2.rotate)
+        val stale = OmaLink.planRoster(b.publicB64, sender, "192.168.1.9", body, p2.revoked, listOf(sender), 100).getOrThrow()
+        assertTrue(stale.upsert.none { it.pk == c.publicB64 })
+
+        // The removed device forgets the account.
+        val p3 = OmaLink.planRoster(c.publicB64, sender, "192.168.1.9", afterRevoke, emptyList(), listOf(sender, own(b, "B")), 100).getOrThrow()
+        assertTrue(p3.selfRevoked)
+        assertEquals(setOf(a.publicB64, b.publicB64), p3.remove.toSet())
+        assertTrue(p3.upsert.isEmpty())
+    }
+
+    @Test
+    fun rosterOnlyFromOwnDevices() {
+        val friend = own(DeviceKey.Identity(ByteArray(32) { 14 }), "friend").copy(own_device = false)
+        val body = OmaLink.rosterBody(DeviceKey.Identity(ByteArray(32) { 14 }), "friend", 53317, 0, emptyList(), emptyList())
+        assertTrue(OmaLink.planRoster("x", friend, "10.0.0.1", body, emptyList(), emptyList(), 1).isFailure)
+    }
 }

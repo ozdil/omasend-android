@@ -10,6 +10,7 @@ import io.omarchy.omasend.model.TransferResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Interceptor
@@ -187,6 +188,7 @@ class OmaSendClient(private val context: Context) {
         })
         val sealed = (reply["box"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: error("Missing box")
         val peer = io.omarchy.omasend.crypto.OmaLink.openResponderBox(keys, pA, pB, id.publicB64, sealed).getOrThrow()
+        require(!io.omarchy.omasend.crypto.OmaLink.isRevoked(context, peer.pk)) { "That device was removed from the account" }
         val now = DeviceKey.nowSecs()
         val key = DeviceKey.TrustedKey(
             pk = peer.pk,
@@ -203,6 +205,47 @@ class OmaSendClient(private val context: Context) {
         key
     }
 
+    private val rosterScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    /**
+     * Sends our own-device list and revocations to every own device we can address (and to
+     * nearby revoked devices, so they leave the account). Best effort, in the background.
+     */
+    fun pushRoster() {
+        rosterScope.launch {
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+            val store = DeviceKey.TrustStore(context)
+            val revoked = io.omarchy.omasend.crypto.OmaLink.revoked(context)
+            val own = store.load().filter { it.own_device }
+            val body = io.omarchy.omasend.crypto.OmaLink.rosterBody(
+                DeviceKey.identity(context),
+                NetworkUtils.getDeviceName(context),
+                NetworkUtils.PORT,
+                CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT,
+                own,
+                revoked
+            )
+            val nearby = app?.discoveryManager?.peers?.value.orEmpty()
+            val targets = own.mapNotNull { k ->
+                val seen = nearby.firstOrNull { it.pk == k.pk }
+                val ip = seen?.ip ?: k.ip
+                val port = seen?.port ?: k.port.takeIf { it != 0 } ?: NetworkUtils.PORT
+                if (ip.isBlank()) null else ip to port
+            } + nearby.filter { it.pk in revoked }.map { it.ip to it.port }
+            targets.distinct().map { (ip, port) ->
+                async {
+                    runCatching {
+                        val request = Request.Builder()
+                            .url("http://$ip:$port/api/v2/account/sync")
+                            .post(body.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                        client.newCall(request).execute().close()
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
     /**
      * "Link with OmaID": tries every nearby, not yet trusted v2 device in parallel. Only devices
      * holding [accountId] complete the exchange. On any success the number becomes this
@@ -214,13 +257,17 @@ class OmaSendClient(private val context: Context) {
                 require(io.omarchy.omasend.crypto.OmaIdentity.isValid(accountId)) { "Invalid OmaID" }
                 val myPk = DeviceKey.identity(context).publicB64
                 val known = DeviceKey.TrustStore(context).load().map { it.pk }.toSet()
+                val revoked = io.omarchy.omasend.crypto.OmaLink.revoked(context).toSet()
                 val targets = peers.filter {
-                    it.pk.isNotBlank() && it.pk != myPk && it.pk !in known && NetworkUtils.isPrivateOrLocalIp(it.ip)
+                    it.pk.isNotBlank() && it.pk != myPk && it.pk !in known && it.pk !in revoked && NetworkUtils.isPrivateOrLocalIp(it.ip)
                 }.distinctBy { it.pk }
                 val linked = kotlinx.coroutines.coroutineScope {
                     targets.map { p -> async { linkOne(p.ip, p.port, accountId).getOrNull() } }.awaitAll().filterNotNull()
                 }
-                if (linked.isNotEmpty()) io.omarchy.omasend.crypto.OmaLink.setAccountId(context, accountId)
+                if (linked.isNotEmpty()) {
+                    io.omarchy.omasend.crypto.OmaLink.setAccountId(context, accountId)
+                    pushRoster()
+                }
                 linked
             }
         }

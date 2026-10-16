@@ -63,6 +63,7 @@ object OmaI18n {
         "sheet_paired_note" to mapOf("tr" to "Uçtan uca şifreli. Kendi cihazlarından gelenler otomatik kabul edilir.", "en" to "End-to-end encrypted. Transfers from your own devices are accepted automatically."),
         "sheet_nearby_note" to mapOf("tr" to "Bu cihazla aktarım şifresizdir ve karşı tarafın onayını bekler.", "en" to "Transfers with this device are not encrypted and need the receiver's approval."),
         "unpair" to mapOf("tr" to "Eşleşmeyi kaldır", "en" to "Remove pairing"),
+        "unpair_own_confirm" to mapOf("tr" to "'%s' tüm cihazlarından kaldırılsın mı? Hesap numaran da yenilenir; kaldırılan cihaz eski numarayla geri bağlanamaz.", "en" to "Remove '%s' from all your devices? Your account number is replaced too, so the removed device cannot link back with the old one."),
         "unpair_confirm" to mapOf("tr" to "'%s' ile eşleşme kaldırılsın mı? Tekrar aktarım için yeniden QR ile eşleştirmen gerekir.", "en" to "Remove the pairing with '%s'? You will need to pair again by QR to transfer."),
 
         // ---- add device / pairing

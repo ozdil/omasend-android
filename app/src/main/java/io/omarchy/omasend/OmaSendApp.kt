@@ -135,6 +135,8 @@ class OmaSendApp : Application() {
         io.omarchy.omasend.network.CoreNode.start(this)
         discoveryManager.start()
         wanDiscoveryEngine.start()
+        // Catch up linked devices that missed a link or removal while this app was off.
+        android.os.Handler(mainLooper).postDelayed({ client.pushRoster() }, 10_000L)
     }
 
     fun refreshOmaIdentity(): OmaIdentity {

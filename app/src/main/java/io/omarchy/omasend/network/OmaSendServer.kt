@@ -334,6 +334,13 @@ class OmaSendServer(private val context: Context) {
                 method == "POST" && path == "/api/v2/pair" -> {
                     handlePairV2(input, output, contentLength, peerIp, remainingDeadline)
                 }
+                method == "POST" && path == "/api/v2/account/sync" -> {
+                    if (!isPrivatePeer) {
+                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Not available\"}")
+                    } else {
+                        handleAccountSync(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
+                    }
+                }
                 method == "POST" && (path == "/api/v2/link/start" || path == "/api/v2/link/finish") -> {
                     // Linking is LAN-only; visibility OFF was already refused above.
                     if (!isPrivatePeer) {
@@ -588,6 +595,44 @@ class OmaSendServer(private val context: Context) {
 
     private val linkResponder = OmaLink.Responder()
 
+    /** Own-device roster pushed by a linked device (signed). See OmaLink.applyRoster. */
+    private fun handleAccountSync(
+        input: InputStream,
+        output: OutputStream,
+        headers: Map<String, String>,
+        contentLength: Long,
+        peerIp: String,
+        deadlineMs: Long,
+        pathAndQuery: String
+    ) {
+        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
+        if (body == null) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
+            return
+        }
+        val sender = (v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(body), peerIp) as? DeviceKey.AuthResult.Trusted)?.key
+        if (sender == null) {
+            sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signed request from a linked device required\"}")
+            return
+        }
+        val obj = try {
+            json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
+        } catch (_: Exception) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        OmaLink.applyRoster(context, deviceIdentity.publicB64, sender, peerIp, obj)
+            .onSuccess { plan ->
+                if (plan.added.isNotEmpty()) {
+                    Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke(plan.added.joinToString(", ")) }
+                }
+                sendResponse(output, 200, "OK", "application/json", "{\"ok\":true}")
+            }
+            .onFailure {
+                sendResponse(output, 403, "Forbidden", "application/json", buildJsonObject { put("error", it.message ?: "Rejected") }.toString())
+            }
+    }
+
     private fun handleLink(path: String, input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
         val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
         val obj = body?.let {
@@ -622,6 +667,10 @@ class OmaSendServer(private val context: Context) {
         val myQuic = CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
         linkResponder.finish(deviceIdentity, NetworkUtils.getDeviceName(context), myQuic, peerIp, obj, now)
             .onSuccess { (peer, reply) ->
+                if (OmaLink.isRevoked(context, peer.pk)) {
+                    sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"This device was removed from the account\"}")
+                    return@onSuccess
+                }
                 val ts = DeviceKey.nowSecs()
                 val key = DeviceKey.TrustedKey(
                     pk = peer.pk,
@@ -636,6 +685,7 @@ class OmaSendServer(private val context: Context) {
                 trustStore.upsert(key)
                 Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }
                 sendResponse(output, 200, "OK", "application/json", reply.toString())
+                (context.applicationContext as? io.omarchy.omasend.OmaSendApp)?.client?.pushRoster()
             }
             .onFailure {
                 sendResponse(output, 403, "Forbidden", "application/json", buildJsonObject { put("error", it.message ?: "Link failed") }.toString())

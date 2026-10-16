@@ -468,11 +468,13 @@ fun AddDeviceSheet(
 }
 
 @Composable
-fun RemovePairingDialog(name: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun RemovePairingDialog(name: String, own: Boolean = false, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(OmaI18n.t("unpair")) },
-        text = { Text(OmaI18n.f("unpair_confirm", name), style = MaterialTheme.typography.bodyMedium) },
+        text = {
+            Text(OmaI18n.f(if (own) "unpair_own_confirm" else "unpair_confirm", name), style = MaterialTheme.typography.bodyMedium)
+        },
         confirmButton = {
             Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                 Text(OmaI18n.t("unpair"))

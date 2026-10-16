@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.crypto.DeviceKey
+import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.crypto.OmaIdentity
 import io.omarchy.omasend.model.DiscoveredPeer
 import io.omarchy.omasend.model.DiscoveryMode
@@ -414,8 +415,15 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
     keyToRemove?.let { k ->
         RemovePairingDialog(
             name = k.name,
+            own = k.own_device,
             onConfirm = {
-                DeviceKey.TrustStore(context).remove(k.pk)
+                if (k.own_device) {
+                    // Removes it from every linked device and replaces the account number.
+                    OmaLink.revokeOwnDevice(context, k.pk)
+                    app.client.pushRoster()
+                } else {
+                    DeviceKey.TrustStore(context).remove(k.pk)
+                }
                 keyToRemove = null
             },
             onDismiss = { keyToRemove = null }

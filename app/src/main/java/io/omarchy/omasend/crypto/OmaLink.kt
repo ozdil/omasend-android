@@ -2,11 +2,13 @@ package io.omarchy.omasend.crypto
 
 import android.content.Context
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.bouncycastle.crypto.ec.CustomNamedCurves
@@ -235,6 +237,131 @@ object OmaLink {
     fun openResponderBox(keys: Keys, pA: String, pB: String, myPk: String, sealed: String): Result<LinkedPeer> = runCatching {
         val plain = open(keys.boxKey, "R", sealed).getOrThrow()
         parseIdentity(plain) { rPk -> sigTranscript(pA, pB, myPk, rPk) }
+    }
+
+    // ------------------------------------------------------------- roster and removal
+    //
+    // Linked devices push their own-device list to each other (signed request to
+    // /api/v2/account/sync), so linking with one device joins you to all of them. Removing an
+    // own device revokes its key everywhere, and every device that learns of a new revocation
+    // replaces its account number. Byte-compatible with src/omalink.rs.
+
+    const val MAX_ROSTER = 64
+    const val MAX_REVOKED = 256
+    private const val REVOKED_PREFS = "omasend_revoked_keys"
+
+    fun revoked(context: Context): List<String> = try {
+        val raw = context.getSharedPreferences(REVOKED_PREFS, Context.MODE_PRIVATE).getString("keys", null)
+        if (raw == null) emptyList() else json.parseToJsonElement(raw).jsonArray.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun saveRevoked(context: Context, list: List<String>) {
+        val tail = list.takeLast(MAX_REVOKED)
+        context.getSharedPreferences(REVOKED_PREFS, Context.MODE_PRIVATE).edit()
+            .putString("keys", JsonArray(tail.map { JsonPrimitive(it) }).toString())
+            .apply()
+    }
+
+    fun isRevoked(context: Context, pk: String) = pk in revoked(context)
+
+    /** Removes one of our own devices everywhere. The caller then pushes the roster. */
+    @Synchronized
+    fun revokeOwnDevice(context: Context, pk: String) {
+        val list = revoked(context)
+        if (pk !in list) saveRevoked(context, list + pk)
+        DeviceKey.TrustStore(context).remove(pk)
+        newAccountId(context)
+    }
+
+    fun rosterBody(me: DeviceKey.Identity, myName: String, myPort: Int, myQuic: Int, own: List<DeviceKey.TrustedKey>, revoked: List<String>): JsonObject {
+        val devices = buildList {
+            add(buildJsonObject { put("pk", me.publicB64); put("name", myName); put("port", myPort); put("quic_port", myQuic) })
+            own.filter { it.own_device }.forEach { k ->
+                add(buildJsonObject { put("pk", k.pk); put("name", k.name); put("ip", k.ip); put("port", k.port); put("quic_port", k.quic_port) })
+            }
+        }.take(MAX_ROSTER)
+        return buildJsonObject {
+            put("v", 1)
+            put("devices", JsonArray(devices))
+            put("revoked", JsonArray(revoked.map { JsonPrimitive(it) }))
+        }
+    }
+
+    /** What applying a roster changes; computed without touching storage so it can be tested. */
+    data class RosterPlan(
+        val revoked: List<String>,
+        val remove: List<String>,
+        val upsert: List<DeviceKey.TrustedKey>,
+        val added: List<String>,
+        val selfRevoked: Boolean,
+        val rotate: Boolean
+    )
+
+    fun planRoster(
+        myPk: String,
+        sender: DeviceKey.TrustedKey,
+        senderIp: String,
+        body: JsonObject,
+        revoked: List<String>,
+        existing: List<DeviceKey.TrustedKey>,
+        now: Long
+    ): Result<RosterPlan> = runCatching {
+        require(sender.own_device) { "Only your own devices can share the device list" }
+        require((body["v"] as? JsonPrimitive)?.intOrNull == 1) { "Unsupported roster" }
+        val allRevoked = revoked.toMutableList()
+        val remove = mutableListOf<String>()
+        var selfRevoked = false
+        var newly = false
+        (body["revoked"] as? JsonArray).orEmpty().take(MAX_REVOKED).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.forEach { pk ->
+            if (DeviceKey.decodePk(pk) == null || pk in allRevoked) return@forEach
+            allRevoked += pk
+            newly = true
+            if (pk == myPk) selfRevoked = true else if (existing.any { it.pk == pk }) remove += pk
+        }
+        if (selfRevoked) {
+            // Removed from the account: forget every device we trusted as our own.
+            remove += existing.filter { it.own_device && it.pk !in remove }.map { it.pk }
+            return@runCatching RosterPlan(allRevoked, remove, emptyList(), emptyList(), true, newly)
+        }
+        val upsert = mutableListOf<DeviceKey.TrustedKey>()
+        val added = mutableListOf<String>()
+        (body["devices"] as? JsonArray).orEmpty().take(MAX_ROSTER).forEach { el ->
+            val d = el as? JsonObject ?: return@forEach
+            val pk = str(d, "pk") ?: return@forEach
+            val raw = DeviceKey.decodePk(pk) ?: return@forEach
+            if (pk == myPk || pk in allRevoked) return@forEach
+            val name = (str(d, "name") ?: "Unknown device").take(64)
+            fun port(k: String) = (d[k] as? JsonPrimitive)?.intOrNull?.takeIf { it in 1..65535 } ?: 0
+            val old = existing.firstOrNull { it.pk == pk }
+            val ip = if (pk == sender.pk) senderIp else old?.ip?.takeIf { it.isNotEmpty() } ?: str(d, "ip").orEmpty()
+            if (old == null || !old.own_device) added += name
+            upsert += DeviceKey.TrustedKey(
+                pk = pk,
+                device_id = DeviceKey.deviceIdForPk(raw),
+                name = name,
+                ip = ip.take(64),
+                port = port("port").takeIf { it != 0 } ?: old?.port ?: 0,
+                quic_port = port("quic_port").takeIf { it != 0 } ?: old?.quic_port ?: 0,
+                own_device = true,
+                added_at = old?.added_at ?: now,
+                last_seen = old?.last_seen ?: 0
+            )
+        }
+        RosterPlan(allRevoked, remove, upsert, added, false, newly)
+    }
+
+    /** Applies a roster from [sender] (an own device). Returns the plan that was applied. */
+    @Synchronized
+    fun applyRoster(context: Context, myPk: String, sender: DeviceKey.TrustedKey, senderIp: String, body: JsonObject): Result<RosterPlan> {
+        val store = DeviceKey.TrustStore(context)
+        return planRoster(myPk, sender, senderIp, body, revoked(context), store.load(), DeviceKey.nowSecs()).onSuccess { plan ->
+            if (plan.revoked.size != revoked(context).size) saveRevoked(context, plan.revoked)
+            plan.remove.forEach { store.remove(it) }
+            plan.upsert.forEach { store.upsert(it) }
+            if (plan.rotate) newAccountId(context)
+        }
     }
 
     // ------------------------------------------------------------- responder
