@@ -13,6 +13,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import io.omarchy.omasend.MainActivity
 import io.omarchy.omasend.OmaSendApp
+import io.omarchy.omasend.R
 import io.omarchy.omasend.network.NetworkUtils
 import io.omarchy.omasend.repository.ClipboardVault
 
@@ -83,7 +84,7 @@ class OmaSendForegroundService : Service() {
         val deviceName = NetworkUtils.getDeviceName(this)
 
         val notification = NotificationCompat.Builder(this, OmaSendApp.CHANNEL_SERVICE)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_stat_omasend)
             .setContentTitle("OmaSend Active")
             .setContentText("$deviceName ready on $ip:53317")
             .setContentIntent(pendingIntent)
