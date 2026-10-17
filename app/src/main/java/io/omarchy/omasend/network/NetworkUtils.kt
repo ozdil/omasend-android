@@ -142,21 +142,27 @@ object NetworkUtils {
     }
 
     /**
-     * Strictly validates whether an IP address belongs to RFC 1918 private space,
-     * RFC 3927 link-local, or loopback space.
+     * True for loopback, RFC 1918 private, RFC 3927 link-local and, for IPv6, link-local
+     * (fe80::/10) and unique-local (fc00::/7) addresses. Everything else, including RFC 6598
+     * carrier-grade NAT space (100.64.0.0/10), deprecated IPv6 site-local (fec0::/10) and the
+     * wildcard address, is treated as the Internet.
+     *
+     * The plain-HTTP server and client only ever talk to addresses accepted here.
      */
     fun isPrivateOrLocalAddress(addr: java.net.InetAddress): Boolean {
-        if (addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress) {
-            return true
-        }
+        if (addr.isLoopbackAddress) return true
+        if (addr.isAnyLocalAddress || addr.isMulticastAddress) return false
         val host = addr.hostAddress ?: return false
         return isPrivateOrLocalIp(host)
     }
 
     /**
      * Validates an IP string (optionally "ip:port", "[v6]:port" or with a "%zone") against
-     * RFC 1918, RFC 3927 link-local, RFC 6598 shared space (100.64.0.0/10), loopback, and for
-     * IPv6 link-local (fe80::/10), unique-local (fc00::/7), loopback and IPv4-mapped addresses.
+     * RFC 1918, RFC 3927 link-local, loopback, and for IPv6 link-local (fe80::/10),
+     * unique-local (fc00::/7), loopback and IPv4-mapped addresses.
+     *
+     * RFC 6598 shared space (100.64.0.0/10) is NOT local: it is carrier-grade NAT, where
+     * other subscribers of the same carrier share the address range.
      */
     fun isPrivateOrLocalIp(ip: String): Boolean {
         val raw = ip.trim()
@@ -179,8 +185,6 @@ object NetworkUtils {
         if (octets[0] == 169 && octets[1] == 254) return true
         // 127.0.0.0/8 (Loopback)
         if (octets[0] == 127) return true
-        // 100.64.0.0/10 (RFC 6598 shared address space: carrier NAT, Tailscale)
-        if (octets[0] == 100 && octets[1] in 64..127) return true
 
         return false
     }

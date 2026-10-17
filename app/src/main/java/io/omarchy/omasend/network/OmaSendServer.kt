@@ -182,14 +182,21 @@ class OmaSendServer(private val context: Context) {
                     } catch (_: Exception) {
                         break
                     }
-                    NetworkUtils.configureHighThroughputSocket(clientSocket)
-
+                    // The listener binds every interface (IPv4 and IPv6) and speaks plain HTTP, so a
+                    // phone with a public IPv6 address would be reachable from the Internet. Only
+                    // loopback, RFC 1918, link-local and IPv6 ULA peers are served; anything else is
+                    // dropped before a single byte is read.
                     val remoteAddr = clientSocket.inetAddress
-                    if (remoteAddr == null) {
+                    if (remoteAddr == null || !NetworkUtils.isPrivateOrLocalAddress(remoteAddr)) {
                         try { clientSocket.close() } catch (_: Exception) {}
                         continue
                     }
                     val peerIp = remoteAddr.hostAddress ?: ""
+                    if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+                        try { clientSocket.close() } catch (_: Exception) {}
+                        continue
+                    }
+                    NetworkUtils.configureHighThroughputSocket(clientSocket)
 
                     // Strict Global Concurrency Limit BEFORE launching work
                     if (activeGlobalConnections.get() >= MAX_GLOBAL_CONNECTIONS) {
@@ -332,16 +339,10 @@ class OmaSendServer(private val context: Context) {
 
             val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
 
-            // Check network scope: allow private/local IPs or WAN connections carrying valid OmaID / active token
-            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
-            val headerOmaId = headers["x-omasend-omaid"] ?: getQueryParam(query, "oma_id").ifBlank { null }
-            val queryToken = getQueryParam(query, "token").ifBlank { null }
-            val hasValidActiveToken = queryToken != null && pendingTransfers.isActive(queryToken)
-
-            if (!isPrivatePeer && !isPairedOrKnownOmaId(headerOmaId) && !hasValidActiveToken &&
-                method != "POST" // POST /api/p2p/request and /api/p2p/clipboard may carry oma_id inside JSON body
-            ) {
-                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN origin\"}")
+            // LAN-only, for every method: the accept loop already drops non-local peers; this
+            // second check keeps handleClient safe if it is ever reached another way.
+            if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Only local network peers are served\"}")
                 return
             }
 
@@ -365,19 +366,11 @@ class OmaSendServer(private val context: Context) {
                     handlePairV2(input, output, contentLength, peerIp, remainingDeadline)
                 }
                 method == "POST" && path == "/api/v2/account/sync" -> {
-                    if (!isPrivatePeer) {
-                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Not available\"}")
-                    } else {
-                        handleAccountSync(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
-                    }
+                    handleAccountSync(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
                 }
                 method == "POST" && (path == "/api/v2/link/start" || path == "/api/v2/link/finish") -> {
-                    // Linking is LAN-only; visibility OFF was already refused above.
-                    if (!isPrivatePeer) {
-                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Linking not available\"}")
-                    } else {
-                        handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
-                    }
+                    // Linking is LAN-only (enforced above); visibility OFF was already refused above.
+                    handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
                 }
                 method == "POST" && path == "/api/p2p/request" -> {
                     handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
