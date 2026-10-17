@@ -147,7 +147,7 @@ fun OmaQrScannerDialog(
             scope.launch {
                 val text = GalleryQrDecoder.decodeTextFromUri(context, uri).getOrNull()
                 val omaId = text?.let { GalleryQrDecoder.parseOmaIdFromScannedPayload(it) }
-                if (text != null && onPairUriScanned != null && io.omarchy.omasend.crypto.DeviceKey.isPairUri(text)) {
+                if (text != null && onPairUriScanned != null && io.omarchy.omasend.account.AccountLogic.isScannableLink(text)) {
                     // A pairing QR saved as an image pairs just like a camera scan.
                     isScanningActive = false
                     OmaHapticController(context).onClipboardReceived()
@@ -298,7 +298,7 @@ fun OmaQrScannerDialog(
                     if (clip != null && clip.itemCount > 0) {
                         val text = clip.getItemAt(0).text?.toString() ?: ""
                         val parsed = GalleryQrDecoder.parseOmaIdFromScannedPayload(text)
-                        if (onPairUriScanned != null && io.omarchy.omasend.crypto.DeviceKey.isPairUri(text)) {
+                        if (onPairUriScanned != null && io.omarchy.omasend.account.AccountLogic.isScannableLink(text)) {
                             isScanningActive = false
                             onPairUriScanned(text.trim())
                         } else if (parsed != null) {

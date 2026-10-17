@@ -55,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.R
+import io.omarchy.omasend.account.AccountLogic
+import io.omarchy.omasend.account.AccountPhase
 import io.omarchy.omasend.crypto.DeviceKey
 import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.crypto.OmaIdentity
@@ -71,7 +73,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class Screen { Home, Settings }
+private enum class Screen { Home, Settings, Account }
 
 /** App shell: the device list, the settings screen, and the incoming-transfer prompt on top. */
 @Composable
@@ -82,11 +84,34 @@ fun OmaSendRoot(
     onDeclinePrompt: (String) -> Unit
 ) {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+    // Where "back" leads from the account screen (home or settings).
+    var accountBack by rememberSaveable { mutableStateOf(Screen.Home) }
+    // Account notifications and invite links (https://omaid.app/j#…) open the account screen.
+    val openAccount by app.account.openRequested.collectAsState()
+    LaunchedEffect(openAccount) {
+        if (openAccount) {
+            if (screen != Screen.Account) accountBack = screen
+            screen = Screen.Account
+            app.account.consumeOpen()
+        }
+    }
     when (screen) {
-        Screen.Home -> HomeScreen(app = app, onOpenSettings = { screen = Screen.Settings })
+        Screen.Home -> HomeScreen(
+            app = app,
+            onOpenSettings = { screen = Screen.Settings },
+            onOpenAccount = { accountBack = Screen.Home; screen = Screen.Account }
+        )
         Screen.Settings -> {
             BackHandler { screen = Screen.Home }
-            SettingsScreen(app = app, onBack = { screen = Screen.Home })
+            SettingsScreen(
+                app = app,
+                onBack = { screen = Screen.Home },
+                onOpenAccount = { accountBack = Screen.Settings; screen = Screen.Account }
+            )
+        }
+        Screen.Account -> {
+            BackHandler { screen = accountBack }
+            AccountScreen(app = app, onBack = { screen = accountBack })
         }
     }
     if (incomingPrompt != null) {
@@ -106,7 +131,7 @@ private sealed class SheetTarget {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
+fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit, onOpenAccount: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val discoveryMode by app.discoveryManager.discoveryMode.collectAsState()
@@ -359,6 +384,10 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                 showAddDevice = false
                 showLink = true
             },
+            onOpenAccount = {
+                showAddDevice = false
+                onOpenAccount()
+            },
             onPaired = { name ->
                 showAddDevice = false
                 Toast.makeText(context, OmaI18n.f("paired_with", name), Toast.LENGTH_LONG).show()
@@ -371,14 +400,19 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
             onDismissRequest = { showScanner = false },
             onPairUriScanned = { uri ->
                 showScanner = false
-                Toast.makeText(context, OmaI18n.t("pairing_in_progress"), Toast.LENGTH_SHORT).show()
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) { app.client.pairWithUri(uri) }
-                    result.onSuccess { k ->
-                        app.hapticController.onClipboardReceived()
-                        Toast.makeText(context, OmaI18n.f("paired_with", k.name), Toast.LENGTH_LONG).show()
-                    }.onFailure { e ->
-                        Toast.makeText(context, OmaI18n.f("pair_failed", e.message ?: ""), Toast.LENGTH_LONG).show()
+                if (AccountLogic.isInviteLink(uri)) {
+                    // An OmaID account invite: the account screen asks before joining.
+                    app.account.offerInvite(uri)
+                } else {
+                    Toast.makeText(context, OmaI18n.t("pairing_in_progress"), Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) { app.client.pairWithUri(uri) }
+                        result.onSuccess { k ->
+                            app.hapticController.onClipboardReceived()
+                            Toast.makeText(context, OmaI18n.f("paired_with", k.name), Toast.LENGTH_LONG).show()
+                        }.onFailure { e ->
+                            Toast.makeText(context, OmaI18n.f("pair_failed", e.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             },
@@ -418,7 +452,15 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
             name = k.name,
             own = k.own_device,
             onConfirm = {
-                if (k.own_device) {
+                val acct = app.account.state.value.view
+                if (acct?.phase == AccountPhase.MEMBER && acct.devices.any { it.pk == k.pk }) {
+                    // An OmaID account device: removed from the account (keys are rotated).
+                    scope.launch {
+                        if (!app.account.remove(k.pk)) {
+                            Toast.makeText(context, app.account.state.value.error ?: OmaI18n.t("err_transfer_failed"), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else if (k.own_device) {
                     // Removes it from every linked device and replaces the account number.
                     OmaLink.revokeOwnDevice(context, k.pk)
                     app.client.pushRoster()

@@ -1,6 +1,7 @@
 package io.omarchy.omasend.ui
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -73,11 +74,11 @@ fun setVisibility(context: Context, app: OmaSendApp, visible: Boolean) {
 }
 
 /** Copies [text]; [sensitive] keeps it out of clipboard previews and the clipboard sync (Android 13+). */
-private fun copyToClipboard(context: Context, label: String, text: String, sensitive: Boolean = false) {
+internal fun copyToClipboard(context: Context, label: String, text: String, sensitive: Boolean = false) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     val clip = ClipData.newPlainText(label, text)
     if (sensitive) {
-        clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
     }
     clipboard.setPrimaryClip(clip)
     Toast.makeText(context, OmaI18n.t("copied"), Toast.LENGTH_SHORT).show()
@@ -93,9 +94,10 @@ fun displayOmaId(formattedId: String, revealed: Boolean): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
+fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit, onOpenAccount: () -> Unit) {
     val context = LocalContext.current
     val discoveryMode by app.discoveryManager.discoveryMode.collectAsState()
+    val account by app.account.state.collectAsState()
 
     var omaId by remember { mutableStateOf(OmaLink.accountId(context)) }
     var revealed by remember { mutableStateOf(false) }
@@ -138,33 +140,46 @@ fun SettingsScreen(app: OmaSendApp, onBack: () -> Unit) {
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // ---- OmaID: the account number, Mullvad style
-            SectionLabel(OmaI18n.t("omaid"))
+            // ---- OmaID account: one number for all devices (approved once, works over the internet)
+            SectionLabel(OmaI18n.t("acct_title"))
             SettingsGroup {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = displayOmaId(omaId, revealed),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = JetBrainsMonoFontFamily,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { revealed = !revealed }) {
-                            Icon(
-                                if (revealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = OmaI18n.t(if (revealed) "omaid_hide" else "omaid_show")
+                SettingsRow(
+                    title = OmaI18n.t("acct_title"),
+                    subtitle = OmaI18n.t("acct_intro"),
+                    value = accountSummary(account),
+                    onClick = onOpenAccount
+                )
+            }
+
+            // ---- legacy OmaID (SPAKE2 linking on the local network); off once an account exists
+            if (account.loaded && account.view == null) {
+                SectionLabel(OmaI18n.t("acct_legacy"))
+                SettingsGroup {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = displayOmaId(omaId, revealed),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f)
                             )
+                            IconButton(onClick = { revealed = !revealed }) {
+                                Icon(
+                                    if (revealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = OmaI18n.t(if (revealed) "omaid_hide" else "omaid_show")
+                                )
+                            }
+                            IconButton(onClick = { copyToClipboard(context, "OmaID", OmaIdentity.unformat(omaId), sensitive = true) }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = OmaI18n.t("copy"))
+                            }
                         }
-                        IconButton(onClick = { copyToClipboard(context, "OmaID", OmaIdentity.unformat(omaId), sensitive = true) }) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = OmaI18n.t("copy"))
-                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(OmaI18n.t("omaid_body"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(onClick = { showOmaIdEntry = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_link")) }
+                        TextButton(onClick = { showOmaIdReset = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_new")) }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(OmaI18n.t("omaid_body"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedButton(onClick = { showOmaIdEntry = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_link")) }
-                    TextButton(onClick = { showOmaIdReset = true }, modifier = Modifier.fillMaxWidth()) { Text(OmaI18n.t("omaid_new")) }
                 }
             }
 

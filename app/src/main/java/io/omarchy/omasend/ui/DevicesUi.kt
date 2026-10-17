@@ -363,8 +363,10 @@ fun AddDeviceSheet(
     onScan: () -> Unit,
     onConnectByIp: () -> Unit,
     onLinkWithOmaId: () -> Unit,
+    onOpenAccount: () -> Unit,
     onPaired: (String) -> Unit
 ) {
+    val account by app.account.state.collectAsState()
     var showQr by remember { mutableStateOf(false) }
     var ownDevice by remember { mutableStateOf(true) }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
@@ -421,10 +423,19 @@ fun AddDeviceSheet(
                     Text(OmaI18n.t("show_my_qr"), style = MaterialTheme.typography.titleSmall)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                TextButton(onClick = onLinkWithOmaId) {
+                // OmaID account: your devices everywhere, approved once (also over the internet).
+                TextButton(onClick = onOpenAccount) {
                     Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(OmaI18n.t("omaid_link"))
+                    Text(OmaI18n.t("acct_title"))
+                }
+                // Legacy number linking (same network only) is off once an account exists.
+                if (account.loaded && account.view == null) {
+                    TextButton(onClick = onLinkWithOmaId) {
+                        Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(OmaI18n.t("omaid_link"))
+                    }
                 }
                 TextButton(onClick = onConnectByIp) {
                     Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))

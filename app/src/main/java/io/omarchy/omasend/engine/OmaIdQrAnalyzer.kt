@@ -49,7 +49,7 @@ class OmaIdQrAnalyzer(
                 val result = reader.decodeWithState(binaryBitmap)
 
                 if (result != null && !result.text.isNullOrBlank() && onPairUriDetected != null &&
-                    io.omarchy.omasend.crypto.DeviceKey.isPairUri(result.text)
+                    io.omarchy.omasend.account.AccountLogic.isScannableLink(result.text)
                 ) {
                     isPaused = true
                     onPairUriDetected.invoke(result.text.trim())
