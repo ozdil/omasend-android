@@ -6,12 +6,12 @@ This document contains all official store metadata, textual assets, and regulato
 
 ## 1. App Identity & Category
 
-- **App Name**: OmaSend - Local P2P Transfer
+- **App Name**: OmaSend for Omarchy
 - **Package Name**: `io.omarchy.omasend`
 - **Default Language**: English (United States) - `en-US`
 - **Secondary Language**: Turkish - `tr-TR`
 - **Category**: Tools / Productivity
-- **Tags / Keywords**: `peer-to-peer`, `file transfer`, `clipboard sync`, `local network`, `lan sharing`, `privacy`, `open source`
+- **Tags / Keywords**: `peer-to-peer`, `file transfer`, `clipboard sync`, `local network`, `lan sharing`, `privacy`, `open source`, `omarchy`
 - **Target Audience**: Ages 13 and older (General Audience)
 - **Contains Ads**: No
 - **In-App Purchases**: No
@@ -22,79 +22,81 @@ This document contains all official store metadata, textual assets, and regulato
 
 ## 2. Store Descriptions
 
+Written for 2.0.8 (OmaID account, internet relay, shared clipboard, mono UI). Do not publish this text with an older build.
+
 ### English (en-US)
 
-**Short Description (Max 80 characters):**
-High-performance local peer-to-peer file transfer and Wayland clipboard sync.
+**App name (max 30):** OmaSend for Omarchy
 
-**Full Description (Max 4000 characters):**
-OmaSend is a high-performance, privacy-first peer-to-peer file and clipboard sharing application built for local networks. It provides seamless cross-platform parity between Omarchy Linux (and other modern Linux distributions) and Android devices.
+**Short description (max 80):**
+Send files and share your clipboard between Omarchy and Android. Privately.
 
-OmaSend works within your local area network (LAN). It has no user accounts, remote databases or relay servers: your files and clipboard content travel directly from device to device at full local network speeds. The only outside contact is a periodic STUN request (see "Network use" below), which carries no file or clipboard data.
+**Full description (max 4000):**
+OmaSend is the file and clipboard sharing app for Omarchy. Send a photo from your phone to your Omarchy desktop, or a file from your desktop to your phone, in a couple of taps.
 
-KEY CAPABILITIES
+It is built on two ideas: sharing should be as simple as tapping a name, and nothing you share should be readable by anyone but you.
 
-1. Instant Local Peer Discovery:
-Using automated UDP broadcast beacons on port 53317, OmaSend discovers nearby devices without manual IP entry. Devices can also be paired by scanning a QR code with the camera.
+WHAT YOU CAN DO
 
-2. High-Speed File Streaming:
-Transfer photos, documents, archives, and media directly between your Android device and Linux workstations with no compression, up to 10 GiB per file, and real-time progress tracking. QR-paired devices use an end-to-end encrypted QUIC connection (UDP port 53318).
+- Send files both ways. Photos, videos, documents and archives go straight between your devices, uncompressed, up to 10 GiB per file.
+- Share from any app. Pick OmaSend in the Android share menu.
+- Share your clipboard. Copy on one of your devices and paste on another. The latest copy wins, and a Quick Settings tile turns it on or off.
+- Pair with a QR code. Scan the code on your Omarchy desktop once, and the two devices trust each other from then on.
+- Use one OmaID on all your devices. Your OmaID is an anonymous 16-digit number. There is no email, name or password. Add a new device by scanning a QR code, or by typing the number and approving it once on a device you already have.
+- Share beyond your Wi-Fi. Devices on the same OmaID reach each other over the internet through an encrypted relay when they are not on the same network.
 
-3. Bi-Directional Clipboard Synchronization:
-Share text snippets, URLs, code blocks, and tokens seamlessly between your Android clipboard and Linux Wayland desktop environment with a single tap.
+PRIVACY
 
-4. System Share Sheet Integration:
-Send any file or text directly from your favorite Android apps using the native Android system share dialog.
+- End-to-end encrypted: paired devices talk over QUIC with TLS 1.3. Relays only pass along encrypted traffic.
+- Anonymous account: your OmaID number never leaves your devices. The registry stores only a value derived from it and your device list, encrypted and signed on your devices.
+- No ads, no analytics, no tracking.
+- Only the permissions it needs: network, notifications, and the camera for scanning QR codes.
 
-5. Background Daemon & Radar Interface:
-Monitor nearby devices and incoming transfers effortlessly with a low-power background service and a cybernetic radar interface.
+DESIGNED FOR OMARCHY
 
-PRIVACY AND ARCHITECTURE GUARANTEES
+OmaSend works with the OmaSend plugin for Omarchy and follows your phone's light or dark theme.
 
-- No Cloud Relay: All transfers are direct connections over your local Wi-Fi or Ethernet network.
-- Zero Telemetry: OmaSend collects no analytics, no crash metrics, no device identifiers, and no user tracking data.
-- Open Protocol Parity: Full wire compatibility with the official OmaSend Linux engine and desktop plugin.
-- Strict Permission Discipline: Requests only the network, notification and camera (QR pairing) permissions it needs.
+OmaSend is an independent project. It is not made or endorsed by the Omarchy project or Basecamp.
 
-OmaSend is designed for users who demand speed, reliability, and absolute privacy on their local networks.
+Support: https://omaid.app/support
+Privacy: https://omaid.app/privacy
 
----
+### Türkçe (tr-TR)
 
-### Turkish (tr-TR)
+**Uygulama adı (en fazla 30):** OmaSend for Omarchy
 
-**Kısa Açıklama (En fazla 80 karakter):**
-Yerel ağ üzerinden hızlı P2P dosya transferi ve Wayland pano eşitleme.
+**Kısa açıklama (en fazla 80):**
+Omarchy ile Android arasında dosya gönderin, panoyu paylaşın. Gizli ve sade.
 
-**Tam Açıklama (En fazla 4000 karakter):**
-OmaSend, yerel ağlar için geliştirilmiş yüksek performanslı ve gizlilik odaklı bir eşler arası (P2P) dosya ve pano paylaşım uygulamasıdır. Omarchy Linux ve modern Linux masaüstü ortamları ile Android cihazlar arasında doğrudan bağlantı sağlar.
+**Tam açıklama (en fazla 4000):**
+OmaSend, Omarchy için dosya ve pano paylaşım uygulamasıdır. Telefonunuzdaki bir fotoğrafı Omarchy masaüstünüze, masaüstünüzdeki bir dosyayı telefonunuza birkaç dokunuşla gönderin.
 
-OmaSend yerel ağınız (LAN) içinde çalışır. Kullanıcı hesabı, uzak veritabanı veya aktarma sunucusu yoktur: dosyalarınız ve pano içerikleriniz cihazlar arasında doğrudan yerel ağ hızında aktarılır. Dışarıyla tek temas, dosya veya pano verisi taşımayan periyodik bir STUN isteğidir (aşağıda "Ağ kullanımı" bölümüne bakın).
+İki fikir üzerine kurulu: paylaşmak bir isme dokunmak kadar kolay olmalı ve paylaştığınız hiçbir şeyi sizden başkası okuyamamalı.
 
-TEMEL ÖZELLİKLER
+NELER YAPABİLİRSİNİZ
 
-1. Anında Yerel Eş Keşfi:
-53317 portu üzerindeki otomatik UDP yayın sinyalleri sayesinde OmaSend, IP adresi girmeye gerek kalmadan yakındaki cihazları bulur. Cihazlar kamerayla QR kod okutularak da eşleştirilebilir.
+- İki yönde dosya gönderin. Fotoğraf, video, belge ve arşivler cihazlarınız arasında doğrudan, sıkıştırılmadan, dosya başına 10 GiB'a kadar gider.
+- Her uygulamadan paylaşın. Android paylaşım menüsünde OmaSend'i seçin.
+- Panonuzu paylaşın. Bir cihazınızda kopyalayın, diğerinde yapıştırın. Son kopyalanan geçerlidir; Hızlı Ayarlar kutucuğuyla açıp kapatabilirsiniz.
+- QR kodla eşleştirin. Omarchy masaüstünüzdeki kodu bir kez okutun; iki cihaz bundan sonra birbirine güvenir.
+- Tüm cihazlarınızda tek OmaID kullanın. OmaID anonim, 16 haneli bir numaradır. E-posta, isim ya da şifre yoktur. Yeni bir cihazı QR kod okutarak ya da numarayı girip mevcut bir cihazınızda bir kez onaylayarak ekleyin.
+- Wi-Fi dışında da paylaşın. Aynı OmaID'deki cihazlar aynı ağda değilken internet üzerinden şifreli bir aktarıcıyla birbirine ulaşır.
 
-2. Yüksek Hızlı Dosya Aktarımı:
-Fotoğraf, video, belge ve arşiv dosyalarını Android cihazınız ile Linux bilgisayarınız arasında sıkıştırma olmadan, dosya başına 10 GiB'a kadar ve anlık ilerleme takibiyle aktarın. QR ile eşleşmiş cihazlar uçtan uca şifreli QUIC bağlantısı (UDP 53318 portu) kullanır.
+GİZLİLİK
 
-3. Çift Yönlü Pano (Clipboard) Eşitleme:
-Metinleri, web adreslerini, kod parçacıklarını ve notları tek dokunuşla Android panonuz ile Linux Wayland masaüstünüz arasında eşitleyin.
+- Uçtan uca şifreli: eşleşmiş cihazlar TLS 1.3 ile QUIC üzerinden konuşur. Aktarıcılar yalnızca şifreli trafiği iletir.
+- Anonim hesap: OmaID numaranız cihazlarınızdan hiç çıkmaz. Kayıt sunucusu yalnızca numaradan türetilmiş bir değeri ve cihazlarınızda şifrelenip imzalanmış cihaz listenizi saklar.
+- Reklam, analiz ve izleme yoktur.
+- Yalnızca gereken izinler: ağ, bildirimler ve QR kod okutmak için kamera.
 
-4. Sistem Paylaşım Menüsü Entegrasyonu:
-Android üzerindeki herhangi bir uygulamadan dosya veya metin paylaşırken doğrudan sistem paylaşım menüsü üzerinden OmaSend'i seçebilirsiniz.
+OMARCHY İÇİN TASARLANDI
 
-5. Arka Plan Hizmeti ve Radar Arayüzü:
-Düşük güç tüketimli arka plan servisi ve modern radar arayüzü ile ağdaki aktif cihazları ve gelen aktarımları kolayca izleyin.
+OmaSend, Omarchy için OmaSend eklentisiyle birlikte çalışır ve telefonunuzun açık ya da koyu temasını izler.
 
-GİZLİLİK VE MİMARİ İLKELER
+OmaSend bağımsız bir projedir. Omarchy projesi veya Basecamp tarafından yapılmamış ya da onaylanmamıştır.
 
-- Bulut Aktarıcısı Yok: Tüm aktarımlar yerel Wi-Fi veya Ethernet ağınız üzerinden doğrudan bağlantıyla yapılır.
-- Sıfır Telemetri: OmaSend hiçbir analiz verisi, çökme raporu, cihaz kimliği veya kullanıcı izleme verisi toplamaz.
-- Açık Protokol Uyumluluğu: Resmi OmaSend Linux motoru ve masaüstü eklentisiyle tam protokol uyumluluğu.
-- Sıkı İzin Yönetimi: Yalnızca gerekli ağ, bildirim ve kamera (QR eşleştirme) izinlerini talep eder.
-
-OmaSend, yerel ağlarında hız, kararlılık ve mutlak gizlilik isteyen kullanıcılar için tasarlanmıştır.
+Destek: https://omaid.app/support
+Gizlilik: https://omaid.app/privacy
 
 ---
 
@@ -107,7 +109,7 @@ Google Play Console'da "Data safety" (Veri güvenliği) adımı için resmi yan�
 2. **Is all of the user data collected by your app encrypted in transit?**
    - Answer: **NOT APPLICABLE** (No data is collected by the developer or transmitted to developer servers).
 3. **Do you provide a way for users to request that their data be deleted?**
-   - Answer: **NOT APPLICABLE** (No user accounts or cloud storage exist).
+   - Answer: **NOT APPLICABLE** for collected data. Since 2.0.8 the optional OmaID registry entry holds only end-to-end encrypted data the developer cannot read; removing the last device from an account deletes it.
 4. **Is your app target audience including children?**
    - Answer: **NO** (Ages 13+).
 
@@ -129,6 +131,11 @@ Matches `app/src/main/AndroidManifest.xml`. OmaSend declares no Bluetooth or loc
 
 ## 5. Network Use (for the Data safety form and the description)
 
-- **LAN only for content:** files and clipboard content are sent only to devices on the local network (legacy HTTP on TCP 53317, or end-to-end encrypted QUIC on UDP 53318 for QR-paired devices). There is no relay or cloud storage.
+As of 2.0.8:
+
+- **Local network:** discovery on UDP 53317; transfers over legacy HTTP on TCP 53317, or end-to-end encrypted QUIC (TLS 1.3) on UDP 53318 for QR-paired devices.
+- **Internet path (only with an OmaID account):** devices on the same account connect through iroh relays when they are not on the same network. Relays forward only encrypted QUIC traffic and see the devices' IP addresses.
+- **OmaID registry (`id.omaid.app`, only with an account):** stores an Argon2-derived account id and the device list, encrypted and Ed25519-signed on the devices. The 16-digit number itself is never sent.
+- **STUN:** disabled since 2.0.8 (the WAN rendezvous engine no longer runs).
 - **Limits:** up to 10 GiB per file.
-- **STUN:** while the app runs, it sends a STUN Binding Request about every 30 seconds to `stun.l.google.com:19302`, `stun1.l.google.com:19302` or `stun.cloudflare.com:3478` to learn its public address. These servers see the device's public IP address; no file, clipboard or identity data is sent. Claims such as "zero cloud contact" must not be used while this is enabled.
+- Because of the relay and the registry, claims such as "no servers" or "zero cloud contact" must not be used.
