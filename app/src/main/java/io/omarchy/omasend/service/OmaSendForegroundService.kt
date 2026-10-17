@@ -97,7 +97,7 @@ class OmaSendForegroundService : Service() {
             .setContentTitle("OmaSend Active")
             .setContentText("$deviceName ready on $ip:53317")
             .setContentIntent(pendingIntent)
-            .addAction(0, OmaI18n.t("clip_tile_label"), ClipboardTileService.shareIntent(this))
+            .addAction(0, OmaI18n.t("clip_share_action"), ClipboardTileService.shareIntent(this))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
