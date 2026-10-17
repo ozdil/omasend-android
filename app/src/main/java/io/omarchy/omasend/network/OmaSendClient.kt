@@ -71,16 +71,13 @@ class OmaSendClient(private val context: Context) {
             body?.writeTo(buf)
             DeviceKey.bodyTagJson(buf.readByteArray())
         }
-        // If the device key is temporarily unreadable, send unsigned: the receiver applies the
-        // legacy rules, which is what this HTTP path is for anyway (paired devices use QUIC).
+        // Never send unsigned: if the device key cannot be read, the request fails with a clear
+        // error instead of silently dropping to the unauthenticated legacy rules.
         val id = DeviceKey.identityOrNull(context)
-        if (id == null) {
-            chain.proceed(req)
-        } else {
-            val signed = req.newBuilder()
-            DeviceKey.authHeaders(id, req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
-            chain.proceed(signed.build())
-        }
+            ?: throw java.io.IOException("Device key unavailable (Android Keystore); refusing to send an unsigned request")
+        val signed = req.newBuilder()
+        DeviceKey.authHeaders(id, req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
+        chain.proceed(signed.build())
     }
 
     /**

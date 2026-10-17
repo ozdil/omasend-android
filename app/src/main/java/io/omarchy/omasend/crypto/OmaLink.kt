@@ -53,9 +53,14 @@ object OmaLink {
         val dir = context.filesDir
         val enc = File(dir, ACCOUNT_FILE)
         val plain = File(dir, ACCOUNT_FILE_PLAIN)
-        val stored = (if (enc.exists()) DeviceKey.unwrapSecret(enc.readBytes())?.toString(Charsets.UTF_8) else null)
-            ?: (if (plain.exists()) plain.readText() else null)
-        if (stored != null && OmaIdentity.isValid(stored)) return OmaIdentity.format(stored)
+        val wrapped = if (enc.exists()) DeviceKey.unwrapSecret(enc.readBytes())?.toString(Charsets.UTF_8) else null
+        if (wrapped != null && OmaIdentity.isValid(wrapped)) return OmaIdentity.format(wrapped)
+        val legacyPlain = if (plain.exists()) plain.readText() else null
+        if (legacyPlain != null && OmaIdentity.isValid(legacyPlain)) {
+            // Migrate a plaintext account number into Keystore-wrapped storage when possible
+            // (writeAccountId deletes the plaintext file once the wrapped copy is written).
+            return writeAccountId(context, legacyPlain)
+        }
         return writeAccountId(context, OmaIdentity.generateRandomOmaId())
     }
 
