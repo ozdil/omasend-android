@@ -69,6 +69,13 @@ data class WanStatus(
     val rendezvousPeers: List<DiscoveredPeer> = emptyList()
 )
 
+/**
+ * WAN rendezvous is DISABLED. Its "blind topic" and "E2EE" payload key were derived from the
+ * public OmaID, so anyone who knew (or sniffed) an OmaID could read and forge announcements.
+ * [start] is a no-op and rendezvous peers are never trusted; nothing publishes beacons. The STUN
+ * helpers are kept for a future design that authenticates peers with the device key.
+ */
+@Suppress("DEPRECATION")
 class WanDiscoveryEngine(
     private val context: Context? = null,
     private val identityProvider: () -> OmaIdentity = {
@@ -98,6 +105,8 @@ class WanDiscoveryEngine(
     val status: StateFlow<WanStatus> = _status.asStateFlow()
 
     fun start() {
+        // Disabled (see class doc): no STUN polling, no rendezvous publishing.
+        if (!ENABLED) return
         if (engineJob?.isActive == true) return
         engineJob = scope.launch {
             while (isActive) {
@@ -117,6 +126,11 @@ class WanDiscoveryEngine(
             isWanReachable = false,
             rendezvousPeers = emptyList()
         )
+    }
+
+    companion object {
+        /** WAN rendezvous keyed by the public OmaID is insecure; keep off until it is redesigned. */
+        const val ENABLED = false
     }
 
     fun setNetworkMode(mode: NetworkTransportMode) {
@@ -268,8 +282,10 @@ class WanDiscoveryEngine(
     }
 
     /**
-     * Creates an encrypted RendezvousBeacon ready for GitHub Discovery Anchor announcement.
+     * Creates a RendezvousBeacon. Its "encryption" is keyed by the public OmaID, so it provides no
+     * confidentiality: never publish it.
      */
+    @Deprecated("Insecure: keyed only by the public OmaID. Never publish.")
     fun createAnnouncementBeacon(
         endpoint: WanEndpoint,
         identity: OmaIdentity,
@@ -298,8 +314,10 @@ class WanDiscoveryEngine(
     }
 
     /**
-     * Decrypts a RendezvousBeacon using target OmaID.
+     * Decrypts a RendezvousBeacon using target OmaID. Anyone who knows the OmaID can forge one,
+     * so the result is untrusted.
      */
+    @Deprecated("Insecure: keyed only by the public OmaID; the result is unauthenticated.")
     fun decryptBeacon(beacon: RendezvousBeacon, omaId: String): RendezvousPayload? {
         val expectedTopic = OmaIdentity.deriveBlindTopic(omaId)
         if (!beacon.blindTopic.equals(expectedTopic, ignoreCase = true)) {
@@ -317,10 +335,7 @@ class WanDiscoveryEngine(
      * Resolves a peer from a decrypted RendezvousPayload.
      */
     fun registerRendezvousPeer(payload: RendezvousPayload): DiscoveredPeer {
-        val myOmaId = try { identityProvider().formattedId } catch (_: Exception) { "" }
-        val isSameOwner = myOmaId.isNotBlank() && payload.omaId.isNotBlank() &&
-            OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(payload.omaId)
-
+        // The payload is unauthenticated (see decryptBeacon): never trusted, never "same owner".
         val peer = DiscoveredPeer(
             id = "wan_${payload.deviceId}",
             name = payload.deviceName,
@@ -329,8 +344,8 @@ class WanDiscoveryEngine(
             transport = "WAN",
             omaId = payload.omaId,
             fingerprint = payload.omaId,
-            isTrusted = true,
-            isSameOwner = isSameOwner,
+            isTrusted = false,
+            isSameOwner = false,
             lastSeen = payload.timestamp
         )
         remotePeers[peer.id] = peer

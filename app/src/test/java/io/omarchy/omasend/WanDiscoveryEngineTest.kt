@@ -5,6 +5,7 @@ import io.omarchy.omasend.network.WanDiscoveryEngine
 import io.omarchy.omasend.network.WanEndpoint
 import io.omarchy.omasend.network.NetworkTransportMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -158,7 +159,9 @@ class WanDiscoveryEngineTest {
         assertEquals("Omarchy Laptop Remote", peer.name)
         assertEquals("198.51.100.77", peer.ip)
         assertEquals("WAN", peer.transport)
-        assertTrue(peer.isTrusted)
+        // Rendezvous payloads are keyed by the public OmaID, so they are never trusted.
+        assertFalse(peer.isTrusted)
+        assertFalse(peer.isSameOwner)
 
         assertEquals(1, engine.status.value.rendezvousPeers.size)
         assertEquals(peer, engine.status.value.rendezvousPeers[0])

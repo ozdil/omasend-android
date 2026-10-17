@@ -169,7 +169,7 @@ class OmaSendApp : Application() {
         // several seconds (ANR risk). Users of CoreNode.node handle "not started yet".
         io.omarchy.omasend.network.CoreNode.startAsync(this, appScope)
         discoveryManager.start()
-        wanDiscoveryEngine.start()
+        // WAN rendezvous (keyed by the public OmaID) is disabled; see WanDiscoveryEngine.
         // Catch up linked devices that missed a link or removal while this app was off.
         android.os.Handler(mainLooper).postDelayed({ client.pushRoster() }, 10_000L)
     }
