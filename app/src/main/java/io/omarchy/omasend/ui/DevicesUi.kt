@@ -52,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -83,7 +84,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /** "Encrypted / online" mark. Monochrome: brighter than the outline, no hue. */
-val Emerald = Color(0xFFC9D1D9)
+/** The theme's ink; "encrypted", "online" and "done" are shown by icon and weight, not by hue. */
+val Ink: Color
+    @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.primary
 
 // ------------------------------------------------------------------ model
 
@@ -196,7 +199,7 @@ fun DeviceRow(
                     )
                     if (own) {
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(OmaI18n.t("badge_own"), style = MaterialTheme.typography.labelSmall, color = Emerald)
+                        Text(OmaI18n.t("badge_own"), style = MaterialTheme.typography.labelSmall, color = Ink)
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
@@ -204,7 +207,7 @@ fun DeviceRow(
                     Icon(
                         if (encrypted) Icons.Default.Lock else Icons.Default.LockOpen,
                         contentDescription = null,
-                        tint = if (encrypted && active) Emerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (encrypted && active) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(5.dp))

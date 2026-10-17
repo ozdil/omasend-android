@@ -185,7 +185,7 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier.size(7.dp).clip(CircleShape)
-                                        .background(if (visible) Emerald else MaterialTheme.colorScheme.outline)
+                                        .background(if (visible) Ink else MaterialTheme.colorScheme.outline)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 val name = NetworkUtils.getDeviceName(context)
