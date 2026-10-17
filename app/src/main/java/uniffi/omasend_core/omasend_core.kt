@@ -765,6 +765,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_omasend_core_checksum_func_account_create(
     ): Int
+    external fun uniffi_omasend_core_checksum_func_account_delete(
+    ): Int
     external fun uniffi_omasend_core_checksum_func_account_format_number(
     ): Int
     external fun uniffi_omasend_core_checksum_func_account_invite(
@@ -806,6 +808,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_omasend_core_checksum_method_omanode_endpoint_id(
     ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_local_addrs(
+    ): Int
+    external fun uniffi_omasend_core_checksum_method_omanode_note_local_clipboard(
     ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_relay_url(
     ): Int
@@ -877,6 +881,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_method_omanode_local_addrs(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_method_omanode_note_local_clipboard(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_omasend_core_fn_method_omanode_relay_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_method_omanode_respond(`ptr`: Long,`transferId`: RustBuffer.ByValue,`accept`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -903,6 +909,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_func_account_create(`http`: Long,`server`: RustBuffer.ByValue,`number`: RustBuffer.ByValue,`me`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_delete(`http`: Long,`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_omasend_core_fn_func_account_format_number(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_func_account_invite(`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1054,6 +1062,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_omasend_core_checksum_func_account_create() and 0xFFFF) != 62643) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_omasend_core_checksum_func_account_delete() and 0xFFFF) != 11947) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_omasend_core_checksum_func_account_format_number() and 0xFFFF) != 40835) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1115,6 +1126,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_omasend_core_checksum_method_omanode_local_addrs() and 0xFFFF) != 28287) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_method_omanode_note_local_clipboard() and 0xFFFF) != 15319) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_omasend_core_checksum_method_omanode_relay_url() and 0xFFFF) != 30059) {
@@ -2420,6 +2434,12 @@ public interface OmaNodeInterface {
     fun `localAddrs`(): List<kotlin.String>
     
     /**
+     * Records a local copy so older clipboard text still in flight from
+     * another device does not overwrite it.
+     */
+    fun `noteLocalClipboard`()
+    
+    /**
      * The relay this node is reachable through ("" without `wan` or before it connects).
      */
     fun `relayUrl`(): kotlin.String
@@ -2598,6 +2618,22 @@ open class OmaNode: Disposable, AutoCloseable, OmaNodeInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Records a local copy so older clipboard text still in flight from
+     * another device does not overwrite it.
+     */override fun `noteLocalClipboard`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_method_omanode_note_local_clipboard(
+        it,
+        _status)
+}
+    }
+    
     
 
     
@@ -3520,6 +3556,21 @@ public object FfiConverterSequenceTypeOfferedFile: FfiConverterRustBuffer<List<O
 }
     )
     }
+    
+
+        /**
+         * Deletes the whole account from the registry (the last device leaving).
+         */
+    @Throws(CoreException::class) fun `accountDelete`(`http`: AccountHttp, `state`: kotlin.String)
+        = 
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_delete(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),_status)
+}
+    
     
  fun `accountFormatNumber`(`input`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
