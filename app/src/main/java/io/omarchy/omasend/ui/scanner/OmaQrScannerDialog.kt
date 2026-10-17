@@ -54,6 +54,7 @@ import io.omarchy.omasend.engine.GalleryQrDecoder
 import io.omarchy.omasend.engine.OmaIdQrAnalyzer
 import io.omarchy.omasend.ui.haptics.OmaHapticController
 import io.omarchy.omasend.ui.theme.*
+import io.omarchy.omasend.ui.OmaI18n
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
@@ -78,7 +79,7 @@ fun OmaQrScannerDialog(
     ) { granted ->
         hasCameraPermission = granted
         if (!granted) {
-            Toast.makeText(context, "Kamera izni reddedildi. Galeriden secim yapabilirsiniz.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, OmaI18n.t("scanner_camera_denied"), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -144,13 +145,19 @@ fun OmaQrScannerDialog(
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val result = GalleryQrDecoder.decodeOmaIdFromUri(context, uri)
-                result.onSuccess { id ->
-                    detectedOmaId = id
+                val text = GalleryQrDecoder.decodeTextFromUri(context, uri).getOrNull()
+                val omaId = text?.let { GalleryQrDecoder.parseOmaIdFromScannedPayload(it) }
+                if (text != null && onPairUriScanned != null && io.omarchy.omasend.crypto.DeviceKey.isPairUri(text)) {
+                    // A pairing QR saved as an image pairs just like a camera scan.
                     isScanningActive = false
                     OmaHapticController(context).onClipboardReceived()
-                }.onFailure {
-                    Toast.makeText(context, "Gorselde gecerli OmaID QR kodu bulunamadi", Toast.LENGTH_SHORT).show()
+                    onPairUriScanned(text)
+                } else if (omaId != null) {
+                    detectedOmaId = omaId
+                    isScanningActive = false
+                    OmaHapticController(context).onClipboardReceived()
+                } else {
+                    Toast.makeText(context, OmaI18n.t("scanner_no_qr_in_image"), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -248,14 +255,14 @@ fun OmaQrScannerDialog(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Kamera Iznine Ihtiyac Var",
+                            text = OmaI18n.t("scanner_camera_needed"),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "OmaID QR kodunu taramak icin kamera izni verin veya galeriden bir gorsel secin.",
+                            text = OmaI18n.t("scanner_camera_needed_body"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFF8B949E),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -265,7 +272,7 @@ fun OmaQrScannerDialog(
                             onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Kamera Iznini Ver")
+                            Text(OmaI18n.t("scanner_grant_camera"))
                         }
                     }
                 }
@@ -299,10 +306,10 @@ fun OmaQrScannerDialog(
                             isScanningActive = false
                             OmaHapticController(context).onClipboardReceived()
                         } else {
-                            Toast.makeText(context, "Panoda gecerli 16 haneli OmaID bulunamadi", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, OmaI18n.t("scanner_no_code_in_clipboard"), Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(context, "Pano bos", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, OmaI18n.t("scanner_clipboard_empty"), Toast.LENGTH_SHORT).show()
                     }
                 },
                 onClose = {
@@ -343,7 +350,7 @@ fun OmaQrScannerDialog(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "OmaID Dogrulandi",
+                                    text = OmaI18n.t("scanner_omaid_verified"),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFE6EDF3)
@@ -383,7 +390,7 @@ fun OmaQrScannerDialog(
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Text("Tekrar Tara")
+                                    Text(OmaI18n.t("scanner_scan_again"))
                                 }
 
                                 Button(
@@ -397,7 +404,7 @@ fun OmaQrScannerDialog(
                                 ) {
                                     Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Cihaza Baglan", fontWeight = FontWeight.Bold, color = Color.Black)
+                                    Text(OmaI18n.t("scanner_connect"), fontWeight = FontWeight.Bold, color = Color.Black)
                                 }
                             }
                         }
@@ -521,7 +528,7 @@ fun OmaQrScannerViewfinder(
                 onClick = onClose,
                 modifier = Modifier.background(Color(0xFF21262D).copy(alpha = 0.85f), CircleShape)
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.White)
+                Icon(Icons.Default.Close, contentDescription = OmaI18n.t("close"), tint = Color.White)
             }
 
             Surface(
@@ -530,7 +537,7 @@ fun OmaQrScannerViewfinder(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF30363D))
             ) {
                 Text(
-                    text = "OMAID TARA",
+                    text = OmaI18n.t("scanner_title"),
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
@@ -549,7 +556,7 @@ fun OmaQrScannerViewfinder(
             ) {
                 Icon(
                     imageVector = if (isFlashOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                    contentDescription = "Flas",
+                    contentDescription = OmaI18n.t("scanner_flash"),
                     tint = if (isFlashOn) Color(0xFFE6EDF3) else Color(0xFF8B949E)
                 )
             }
@@ -576,7 +583,7 @@ fun OmaQrScannerViewfinder(
                 ) {
                     Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Galeriden Sec", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    Text(OmaI18n.t("scanner_from_gallery"), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                 }
 
                 OutlinedButton(
@@ -590,7 +597,7 @@ fun OmaQrScannerViewfinder(
                 ) {
                     Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Panodan Al", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    Text(OmaI18n.t("scanner_from_clipboard"), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                 }
             }
         }

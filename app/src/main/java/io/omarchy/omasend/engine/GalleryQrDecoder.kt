@@ -19,14 +19,22 @@ object GalleryQrDecoder {
     /**
      * Decodes a QR code or barcode containing an OmaID from a local media URI.
      */
-    suspend fun decodeOmaIdFromUri(context: Context, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun decodeOmaIdFromUri(context: Context, uri: Uri): Result<String> =
+        decodeTextFromUri(context, uri).mapCatching { rawText ->
+            parseOmaIdFromScannedPayload(rawText) ?: throw IllegalArgumentException("No valid OmaID in: $rawText")
+        }
+
+    /**
+     * Decodes the raw text of the QR code in a local media URI (an OmaID or a pairing link).
+     */
+    suspend fun decodeTextFromUri(context: Context, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 val options = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
                 BitmapFactory.decodeStream(inputStream, null, options)
-            } ?: throw IllegalStateException("Gorsel decode edilemedi: $uri")
+            } ?: throw IllegalStateException("Could not decode image: $uri")
 
             try {
                 val intArray = IntArray(bitmap.width * bitmap.height)
@@ -42,8 +50,7 @@ object GalleryQrDecoder {
                 val reader = MultiFormatReader().apply { setHints(hints) }
                 val result = reader.decode(binaryBitmap)
 
-                val rawText = result.text ?: throw IllegalStateException("QR icerigi bos")
-                parseOmaIdFromScannedPayload(rawText) ?: throw IllegalArgumentException("Gecerli OmaID bulunamadi: $rawText")
+                result.text?.trim()?.takeIf { it.isNotEmpty() } ?: throw IllegalStateException("Empty QR code")
             } finally {
                 bitmap.recycle()
             }

@@ -3,11 +3,11 @@
 # Verify with: (cd app/src/main/jniLibs && sha256sum -c <(grep -E '^[0-9a-f]{64}  ' CORE_VERSION))
 
 source_repo: omarchy-omasend (desktop repository), crate in core/, built with core/build-android.sh
-source_commit: 5b4479cacd66c750d27910b6901ad6074820e01b
-source_commit_subject: core: retry the well-known QUIC port before falling back to an ephemeral one
+source_commit: 06abc37c26810011f843d496d696f051cf252d8c
+source_commit_subject: fix(core): read Android content URIs through the open descriptor
 bindings: app/src/main/java/uniffi/omasend_core/omasend_core.kt (UniFFI, same commit)
 reproducible: no (built by hand; toolchain not pinned, no --remap-path-prefix)
 
-0f21b1f2a84817df39f9d678cc165382b24051d42fa544212cb3a72dab574ff7  arm64-v8a/libomasend_core.so
-8275ef348adc6d0d3ef93ca5084d3afe2c7c5094afa1c1f034e2917792094316  armeabi-v7a/libomasend_core.so
-d0450ae925b68b5472c2dd89c35f148d78a81361791f734e000227835f3352c4  x86_64/libomasend_core.so
+8173b7f13b832908deecee3020c02bc6f4c3b89c298eeb55036a0ed846b82fb8  arm64-v8a/libomasend_core.so
+d471b1475577335f174bb19cc91624dab1164f91c4584917f085766fc38579c8  armeabi-v7a/libomasend_core.so
+d0d02abf484fa8a771834f79b6205552aad8b461ad9d1e25e99ac25f7cb63084  x86_64/libomasend_core.so

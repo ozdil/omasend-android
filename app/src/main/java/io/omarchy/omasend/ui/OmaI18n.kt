@@ -34,6 +34,22 @@ object OmaI18n {
         "back" to mapOf("tr" to "Geri", "en" to "Back"),
         "share" to mapOf("tr" to "Paylaş", "en" to "Share"),
 
+        // ---- QR scanner
+        "scanner_title" to mapOf("tr" to "QR KOD TARA", "en" to "SCAN QR CODE"),
+        "scanner_flash" to mapOf("tr" to "Flaş", "en" to "Flash"),
+        "scanner_from_gallery" to mapOf("tr" to "Galeriden seç", "en" to "From gallery"),
+        "scanner_from_clipboard" to mapOf("tr" to "Panodan al", "en" to "From clipboard"),
+        "scanner_camera_denied" to mapOf("tr" to "Kamera izni reddedildi. Galeriden seçebilirsiniz.", "en" to "Camera permission denied. You can pick an image from the gallery."),
+        "scanner_camera_needed" to mapOf("tr" to "Kamera izni gerekli", "en" to "Camera permission needed"),
+        "scanner_camera_needed_body" to mapOf("tr" to "QR kodu taramak için kamera izni verin veya galeriden bir görsel seçin.", "en" to "Allow the camera to scan the QR code, or pick an image from the gallery."),
+        "scanner_grant_camera" to mapOf("tr" to "Kamera iznini ver", "en" to "Allow camera"),
+        "scanner_no_qr_in_image" to mapOf("tr" to "Görselde geçerli bir OmaSend QR kodu bulunamadı", "en" to "No OmaSend QR code found in the image"),
+        "scanner_no_code_in_clipboard" to mapOf("tr" to "Panoda eşleştirme bağlantısı veya OmaID yok", "en" to "No pairing link or OmaID in the clipboard"),
+        "scanner_clipboard_empty" to mapOf("tr" to "Pano boş", "en" to "Clipboard is empty"),
+        "scanner_omaid_verified" to mapOf("tr" to "OmaID doğrulandı", "en" to "OmaID verified"),
+        "scanner_scan_again" to mapOf("tr" to "Tekrar tara", "en" to "Scan again"),
+        "scanner_connect" to mapOf("tr" to "Cihaza bağlan", "en" to "Connect"),
+
         // ---- home
         "home_visible" to mapOf("tr" to "Görünür · %s", "en" to "Visible · %s"),
         "home_hidden" to mapOf("tr" to "Gizli · %s", "en" to "Hidden · %s"),
