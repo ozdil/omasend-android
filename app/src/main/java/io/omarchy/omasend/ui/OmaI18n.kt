@@ -221,6 +221,7 @@ object OmaI18n {
         "acct_member_body" to mapOf("tr" to "Bu numarayı yalnızca kendi cihazlarına gir. Numara tek başına hesabı açmaz; her yeni cihazı burada onaylarsın.", "en" to "Enter this number only on your own devices. The number alone opens nothing; you approve each new device here."),
         "acct_settings_none" to mapOf("tr" to "Hesap yok", "en" to "No account"),
         "acct_settings_member" to mapOf("tr" to "%d cihaz", "en" to "%d devices"),
+        "acct_settings_member_one" to mapOf("tr" to "1 cihaz", "en" to "1 device"),
         "acct_invite_confirm_title" to mapOf("tr" to "OmaID hesabına katıl", "en" to "Join an OmaID account"),
         "acct_invite_confirm" to mapOf("tr" to "Bu bağlantı bu cihazı bir OmaID hesabına ekler. O hesabın cihazları senin cihazın sayılır: gönderdikleri otomatik kabul edilir. Yalnızca kendi cihazındaki QR kodu okuttuysan devam et.", "en" to "This link adds this device to an OmaID account. That account's devices are treated as yours: what they send is accepted automatically. Continue only if you scanned the QR code on your own device."),
         "acct_already_member" to mapOf("tr" to "Bu cihaz zaten bir OmaID hesabında. Önce hesaptan çık.", "en" to "This device is already on an OmaID account. Leave it first."),

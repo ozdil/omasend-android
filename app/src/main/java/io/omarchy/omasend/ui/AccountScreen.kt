@@ -88,7 +88,7 @@ import kotlinx.coroutines.withContext
 fun accountSummary(state: OmaAccount.UiState): String {
     val v = state.view ?: return OmaI18n.t("acct_settings_none")
     return when (v.phase) {
-        AccountPhase.MEMBER -> OmaI18n.f("acct_settings_member", v.devices.size)
+        AccountPhase.MEMBER -> if (v.devices.size == 1) OmaI18n.t("acct_settings_member_one") else OmaI18n.f("acct_settings_member", v.devices.size)
         AccountPhase.WAITING -> OmaI18n.t("acct_waiting_title")
         AccountPhase.RESETTING -> OmaI18n.t("acct_resetting_title")
     }
