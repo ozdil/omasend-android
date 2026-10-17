@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/Release-v1.8.6-38BDF8?style=for-the-badge&logo=android" alt="Release v1.8.6" /></a>
+  <a href="https://github.com/ozdil/omasend-android/releases"><img src="https://img.shields.io/badge/Release-v2.0.9-38BDF8?style=for-the-badge&logo=android" alt="Release v2.0.9" /></a>
   <a href="https://play.google.com/apps/testing/io.omarchy.omasend"><img src="https://img.shields.io/badge/Google%20Play-Closed%20Beta-34A853?style=for-the-badge&logo=googleplay&logoColor=white" alt="Google Play Closed Beta" /></a>
   <a href="https://groups.google.com/g/omasend-testers"><img src="https://img.shields.io/badge/Google%20Group-Join%20Testers-4285F4?style=for-the-badge&logo=googlegroups&logoColor=white" alt="Join Google Group" /></a>
   <a href="https://github.com/ozdil/omarchy-omasend"><img src="https://img.shields.io/badge/Omarchy%20Linux-Desktop%20Plugin-00ADD8?style=for-the-badge&logo=archlinux&logoColor=white" alt="Omarchy Linux Desktop Plugin" /></a>
@@ -13,19 +13,25 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
 </p>
 
-> **High-performance, privacy-first local peer-to-peer file transfer, Anonymous Numbered Identity (Zero-Log OmaID) with Zero-Click My Devices mesh, system share-sheet integration, and real-time Wayland clipboard vault between Android, Web PWA, and Omarchy Linux.**
+> **OmaSend for Omarchy: send files and clipboard between your Android phone, Omarchy Linux and the browser. Pair once with a QR code and everything between your devices is end-to-end encrypted. An optional anonymous OmaID connects your own devices over the internet too. No sign-up, no e-mail, no tracking.**
 
 ---
 
-## Architectural Evolution: OmaSend V2 Mobile Engineering
+## What's new in 2.0.9 (versionCode 109)
 
-OmaSend for Android is engineered in lockstep with the Omarchy Linux desktop daemon and Web PWA client:
+**New**
+- **OmaID account.** One anonymous 16-digit number for all of your devices, Mullvad style: no e-mail, no name, no phone number. The number never leaves the phone; the registry at `id.omaid.app` only stores an Argon2id-derived id and an end-to-end encrypted, signed device list. Add a device with the number and a one-time approval (both screens show the same 6-digit code), or scan a join QR (`https://omaid.app/j#…`).
+- **Over the internet.** With an OmaID your own devices connect through encrypted iroh relays when they are not on the same network, and switch to a direct connection when they can. Transfers over 4 GiB wait for a direct connection.
+- **Shared clipboard, last copy wins.** Your latest copy reaches your own devices silently; copies older than 2 minutes, or older than a newer one, are dropped. Quick Settings tile **Clipboard**.
+- **One ink.** Monochrome OmaSend logo and UI that follow the phone's light/dark theme and Material You tones; tap a device to send.
 
-- **Anonymous Numbered Identity (Zero-Log OmaID) & Zero-Click My Devices:** Free and open-source 16-digit Luhn mod-10 numbered account identity (`XXXX-XXXX-XXXX-XXXX`). Enter the same OmaID on your PC and phone to form an instant Zero-Click trust mesh using RFC 2104 HMAC-SHA256 Blinded Rendezvous topics, RFC 5869 HKDF-SHA256 key derivation, and constant-time (`MessageDigest.isEqual`) verification.
-- **AMOLED Zen Radar & Samurai Audio Feedback:** Clean status indicators (`[OMAID P2P]`, same-OmaID device grouping), responsive tactile feedback, and authentic samurai sound effects on send (*"OMAKASE!"*) and receive/accept (*"ONEGAI SHIMASU!"*).
-- **Universal Multi-Format Clipboard Vault:** Real-time bi-directional clipboard sync supporting text and images with automatic WebP micro-thumbnail caching.
-- **Sensitive Clipboard Shield:** Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE` and password manager tags are automatically detected to protect credentials.
-- **Zero-Copy ByteBuffers (`ASharedMemory` Architecture):** Memory allocations are optimized at the NDK layer, eliminating Garbage Collection pauses during multi-gigabyte streams.
+**Bug fixes**
+- Phone to PC sends no longer fail with "Permission denied (os error 13)".
+- "From gallery" pairs with a pairing QR saved as an image.
+- A refused transfer shows the refusal instead of waiting it out.
+- The Quick Settings tile label is no longer cut off; "1 device" instead of "1 devices"; About text is current.
+
+Full history: [desktop CHANGELOG](https://github.com/ozdil/omarchy-omasend/blob/next/CHANGELOG.md).
 
 ---
 
@@ -51,33 +57,28 @@ OmaSend for Android is distributed officially via **Google Play** with verified 
 
 ## Features & Capabilities
 
-- **Native Android Share Sheet Integration:** Share photos, videos, audio, documents, and archives directly from Gallery, Camera, or Files with 1 tap.
-- **Live Bi-Directional Clipboard Bridge:** Instantly copy text or images from your PC's Wayland desktop into Android, or push Android text directly to Linux with echo-loop prevention.
-- **Zero Cloud & Absolute Privacy:** Operates strictly over local Wi-Fi and Blinded Rendezvous channels. Zero telemetry, zero external cloud servers, and zero tracking.
-- **Instant UDP Discovery:** Automatic device discovery on port `53317` without tedious manual IP typing.
-- **Modern Jetpack Compose UI:** Built with Material 3, Dark Acrylic palette, and fluid reactive state management.
-- **Security status:** Every incoming transfer requires approval and clipboard sync is limited to paired devices. LAN traffic is not yet end-to-end encrypted or cryptographically authenticated; use it on trusted networks. Per-device keys and authenticated encryption are on the roadmap.
+- **Tap a device, send:** share photos, videos, documents and archives from any app through the system share sheet, or pick them in OmaSend.
+- **QR pairing with per-device keys:** each phone has its own Ed25519 key, wrapped by the Android Keystore. Paired devices talk over QUIC + TLS 1.3 (the shared Rust `omasend-core`), and files are verified with BLAKE3 and resume where they stopped.
+- **My devices and other people's devices:** devices you pair as your own accept transfers automatically and share the clipboard; anyone else's always needs your approval.
+- **OmaID:** optional anonymous account that keeps your device list in sync and connects your devices over the internet (see above).
+- **Clipboard:** text from your own devices, newest copy wins; clipboard items marked sensitive by Android 13+ (password managers) are never shared.
+- **Nearby devices:** unpaired devices on the same network still work over the legacy HTTP path (port `53317`), always with approval. That path is not encrypted; use it on networks you trust.
 
 ---
 
-## Security and Enterprise Zero-Trust Architecture
+## Security
 
-1. **Anti-Forensics & RAM Zeroization (Memory Scrubbing):**
-   Cryptographic keys, in-flight transit buffers, and sensitive data are scrubbed from RAM immediately after use via explicit zero-fill byte manipulation.
-
-2. **Quantum-Resilient Cryptography:**
-   Integrates **BLAKE3**, a high-performance, quantum-resilient Merkle tree cryptographic hashing algorithm for stream and protocol header validation, alongside standard SHA-256.
-
-3. **Strict Dependency Verification:**
-   Every single Gradle dependency is cryptographically pinned and verified against SHA-256 checksums in `verification-metadata.xml`.
+- **End-to-end encryption between paired devices:** QUIC/TLS 1.3 bound to each device's key; there is no silent fallback to plain HTTP for paired devices.
+- **No personal data:** no sign-up, no analytics. The OmaID registry never sees your number, names or files; relays only carry encrypted traffic.
+- **Verified builds:** every Gradle dependency is pinned to a SHA-256 checksum in `gradle/verification-metadata.xml`.
 
 ---
 
-## Omarchy Linux Desktop & Web PWA Integration
+## Omarchy Linux Desktop & Web Client
 
 - **Desktop Plugin Repository:** [ozdil/omarchy-omasend](https://github.com/ozdil/omarchy-omasend)
-- **Web PWA Client Repository:** [ozdil/omasend-web](https://github.com/ozdil/omasend-web)
-- **Engine Protocol:** Compatible with OmaSend Linux Engine (`omasend-engine`) on port `53317`.
+- **Web Client Repository:** [ozdil/omasend-web](https://github.com/ozdil/omasend-web)
+- **Engine Protocol:** Compatible with the OmaSend desktop engine (`omasend-engine`) 2.0.9: QUIC on UDP `53318`, legacy HTTP on `53317`.
 
 ---
 
