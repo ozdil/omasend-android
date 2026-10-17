@@ -673,6 +673,9 @@ internal interface UniffiCallbackInterfaceNodeCallbacksMethod5 : com.sun.jna.Cal
 internal interface UniffiCallbackInterfaceNodeCallbacksMethod6 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`peerPk`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceAccountHttpMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`method`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "trust", "peerName", "incomingOffer", "progress", "fileReceived", "transferFinished", "clipboard")
 internal open class UniffiVTableCallbackInterfaceNodeCallbacks(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -710,6 +713,25 @@ internal open class UniffiVTableCallbackInterfaceNodeCallbacks(
     }
 
 }
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "request")
+internal open class UniffiVTableCallbackInterfaceAccountHttp(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `request`: UniffiCallbackInterfaceAccountHttpMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `request`: UniffiCallbackInterfaceAccountHttpMethod0? = null,
+    ): UniffiVTableCallbackInterfaceAccountHttp(`uniffiFree`,`uniffiClone`,`request`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceAccountHttp) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `request` = other.`request`
+    }
+
+}
 
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
@@ -735,6 +757,34 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_omasend_core_checksum_func_account_approve(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_cancel_reset(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_change_number(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_create(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_format_number(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_invite(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_join(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_leave(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_new_number(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_number_valid(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_reject(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_remove(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_reset_start(
+    ): Int
+    external fun uniffi_omasend_core_checksum_func_account_sync(
+    ): Int
     external fun uniffi_omasend_core_checksum_method_nodecallbacks_trust(
     ): Int
     external fun uniffi_omasend_core_checksum_method_nodecallbacks_peer_name(
@@ -757,6 +807,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_local_addrs(
     ): Int
+    external fun uniffi_omasend_core_checksum_method_omanode_relay_url(
+    ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_respond(
     ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_send_clipboard(
@@ -764,6 +816,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_omasend_core_checksum_method_omanode_send_files(
     ): Int
     external fun uniffi_omasend_core_checksum_method_omanode_shutdown(
+    ): Int
+    external fun uniffi_omasend_core_checksum_method_accounthttp_request(
     ): Int
     external fun uniffi_omasend_core_checksum_constructor_omanode_start(
     ): Int
@@ -783,6 +837,7 @@ internal object UniffiLib {
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "omasend_core"))
+        uniffiCallbackInterfaceAccountHttp.register(this)
         uniffiCallbackInterfaceNodeCallbacks.register(this)
         
     }
@@ -822,6 +877,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_method_omanode_local_addrs(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_method_omanode_relay_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_method_omanode_respond(`ptr`: Long,`transferId`: RustBuffer.ByValue,`accept`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_omasend_core_fn_method_omanode_send_clipboard(`ptr`: Long,`peerPk`: RustBuffer.ByValue,`addrs`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -830,6 +887,42 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_omasend_core_fn_method_omanode_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_omasend_core_fn_clone_accounthttp(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_omasend_core_fn_free_accounthttp(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_omasend_core_fn_init_callback_vtable_accounthttp(`vtable`: UniffiVTableCallbackInterfaceAccountHttp,
+    ): Unit
+    external fun uniffi_omasend_core_fn_method_accounthttp_request(`ptr`: Long,`method`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_approve(`http`: Long,`state`: RustBuffer.ByValue,`rid`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_cancel_reset(`http`: Long,`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_omasend_core_fn_func_account_change_number(`http`: Long,`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_create(`http`: Long,`server`: RustBuffer.ByValue,`number`: RustBuffer.ByValue,`me`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_format_number(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_invite(`state`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_join(`http`: Long,`server`: RustBuffer.ByValue,`number`: RustBuffer.ByValue,`me`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_leave(`http`: Long,`state`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_omasend_core_fn_func_account_new_number(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_number_valid(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_omasend_core_fn_func_account_reject(`http`: Long,`state`: RustBuffer.ByValue,`rid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_omasend_core_fn_func_account_remove(`http`: Long,`state`: RustBuffer.ByValue,`pk`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_reset_start(`http`: Long,`server`: RustBuffer.ByValue,`number`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_omasend_core_fn_func_account_sync(`http`: Long,`state`: RustBuffer.ByValue,`me`: RustBuffer.ByValue,`deviceSeed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun ffi_omasend_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_omasend_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -949,6 +1042,48 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_omasend_core_checksum_func_account_approve() and 0xFFFF) != 26911) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_cancel_reset() and 0xFFFF) != 16024) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_change_number() and 0xFFFF) != 11737) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_create() and 0xFFFF) != 62643) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_format_number() and 0xFFFF) != 40835) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_invite() and 0xFFFF) != 25121) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_join() and 0xFFFF) != 62355) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_leave() and 0xFFFF) != 53910) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_new_number() and 0xFFFF) != 26608) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_number_valid() and 0xFFFF) != 20602) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_reject() and 0xFFFF) != 12956) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_remove() and 0xFFFF) != 60649) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_reset_start() and 0xFFFF) != 5933) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_func_account_sync() and 0xFFFF) != 5362) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_omasend_core_checksum_method_nodecallbacks_trust() and 0xFFFF) != 18784) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -982,6 +1117,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_omasend_core_checksum_method_omanode_local_addrs() and 0xFFFF) != 28287) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_omasend_core_checksum_method_omanode_relay_url() and 0xFFFF) != 30059) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_omasend_core_checksum_method_omanode_respond() and 0xFFFF) != 26384) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -992,6 +1130,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_omasend_core_checksum_method_omanode_shutdown() and 0xFFFF) != 11557) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_omasend_core_checksum_method_accounthttp_request() and 0xFFFF) != 35117) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_omasend_core_checksum_constructor_omanode_start() and 0xFFFF) != 46866) {
@@ -1331,6 +1472,328 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
     override fun write(value: ByteArray, buf: ByteBuffer) {
         buf.putInt(value.size)
         buf.put(value)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * HTTP done by the host (curl on the desktop, OkHttp on Android). `status` 0 = no network.
+ */
+public interface AccountHttp {
+    
+    fun `request`(`method`: kotlin.String, `url`: kotlin.String, `body`: kotlin.String): HttpReply
+    
+    companion object
+}
+
+/**
+ * HTTP done by the host (curl on the desktop, OkHttp on Android). `status` 0 = no network.
+ */
+open class AccountHttpImpl: Disposable, AutoCloseable, AccountHttp
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_omasend_core_fn_free_accounthttp(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_omasend_core_fn_clone_accounthttp(handle, status)
+        }
+    }
+
+    override fun `request`(`method`: kotlin.String, `url`: kotlin.String, `body`: kotlin.String): HttpReply {
+            return FfiConverterTypeHttpReply.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_method_accounthttp_request(
+        it,
+        
+        FfiConverterString.lower(`method`),
+        FfiConverterString.lower(`url`),
+        FfiConverterString.lower(`body`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceAccountHttp {
+    internal object `request`: UniffiCallbackInterfaceAccountHttpMethod0 {
+        override fun callback(`uniffiHandle`: Long,`method`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeAccountHttp.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`request`(
+                    FfiConverterString.lift(`method`),
+                    FfiConverterString.lift(`url`),
+                    FfiConverterString.lift(`body`),
+                )
+            }
+            val writeReturn = { value: HttpReply -> uniffiOutReturn.setValue(FfiConverterTypeHttpReply.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeAccountHttp.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeAccountHttp.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceAccountHttp.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `request`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_omasend_core_fn_init_callback_vtable_accounthttp(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountHttp: FfiConverter<AccountHttp, Long> {
+    internal val handleMap = UniffiHandleMap<AccountHttp>()
+
+    override fun lower(value: AccountHttp): Long {
+        if (value is AccountHttpImpl) {
+             // Rust-implemented object.  Clone the handle and return it
+            return value.uniffiCloneHandle()
+         } else {
+            // Kotlin object, generate a new vtable handle and return that.
+            return handleMap.insert(value)
+         }
+    }
+
+    override fun lift(value: Long): AccountHttp {
+        if ((value and 1.toLong()) == 0.toLong()) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return AccountHttpImpl(UniffiWithHandle, value)
+        } else {
+            // Kotlin-generated handle, get the object from the handle map
+            return handleMap.remove(value)
+        }
+    }
+
+    override fun read(buf: ByteBuffer): AccountHttp {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: AccountHttp) = 8UL
+
+    override fun write(value: AccountHttp, buf: ByteBuffer) {
+        buf.putLong(lower(value))
     }
 }
 
@@ -1957,6 +2420,11 @@ public interface OmaNodeInterface {
     fun `localAddrs`(): List<kotlin.String>
     
     /**
+     * The relay this node is reachable through ("" without `wan` or before it connects).
+     */
+    fun `relayUrl`(): kotlin.String
+    
+    /**
      * Answer an `incoming_offer`. Unknown ids are ignored.
      */
     fun `respond`(`transferId`: kotlin.String, `accept`: kotlin.Boolean)
@@ -2134,6 +2602,22 @@ open class OmaNode: Disposable, AutoCloseable, OmaNodeInterface
 
     
     /**
+     * The relay this node is reachable through ("" without `wan` or before it connects).
+     */override fun `relayUrl`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_method_omanode_relay_url(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Answer an `incoming_offer`. Unknown ids are ignored.
      */override fun `respond`(`transferId`: kotlin.String, `accept`: kotlin.Boolean)
         = 
@@ -2262,6 +2746,232 @@ public object FfiConverterTypeOmaNode: FfiConverter<OmaNode, Long> {
 
 
 
+/**
+ * One device of the account, as stored in the vault.
+ */
+data class AccountDevice (
+    var `pk`: kotlin.String
+    , 
+    var `name`: kotlin.String
+    , 
+    /**
+     * iroh relay URL this device is reachable through ("" = LAN only).
+     */
+    var `relay`: kotlin.String
+    , 
+    /**
+     * "ip:port" QUIC addresses on its local network.
+     */
+    var `addrs`: List<kotlin.String>
+    , 
+    var `added`: kotlin.ULong
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountDevice: FfiConverterRustBuffer<AccountDevice> {
+    override fun read(buf: ByteBuffer): AccountDevice {
+        return AccountDevice(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountDevice) = (
+            FfiConverterString.allocationSize(value.`pk`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`relay`) +
+            FfiConverterSequenceString.allocationSize(value.`addrs`) +
+            FfiConverterULong.allocationSize(value.`added`)
+    )
+
+    override fun write(value: AccountDevice, buf: ByteBuffer) {
+            FfiConverterString.write(value.`pk`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`relay`, buf)
+            FfiConverterSequenceString.write(value.`addrs`, buf)
+            FfiConverterULong.write(value.`added`, buf)
+    }
+}
+
+
+
+data class AccountInvite (
+    var `state`: kotlin.String
+    , 
+    /**
+     * Link for the QR code: `https://omaid.app/j#n=<number>&k=<invite key>`.
+     */
+    var `uri`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountInvite: FfiConverterRustBuffer<AccountInvite> {
+    override fun read(buf: ByteBuffer): AccountInvite {
+        return AccountInvite(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountInvite) = (
+            FfiConverterString.allocationSize(value.`state`) +
+            FfiConverterString.allocationSize(value.`uri`)
+    )
+
+    override fun write(value: AccountInvite, buf: ByteBuffer) {
+            FfiConverterString.write(value.`state`, buf)
+            FfiConverterString.write(value.`uri`, buf)
+    }
+}
+
+
+
+data class AccountReport (
+    /**
+     * Updated secret state to persist ("" when the device left the account).
+     */
+    var `state`: kotlin.String
+    , 
+    var `status`: AccountStatus
+    , 
+    var `number`: kotlin.String
+    , 
+    var `devices`: List<AccountDevice>
+    , 
+    var `revoked`: List<kotlin.String>
+    , 
+    var `joins`: List<JoinRequest>
+    , 
+    /**
+     * Someone started a reset of this account with the number (members can cancel).
+     */
+    var `resetPending`: kotlin.Boolean
+    , 
+    /**
+     * Join code of this device while `Waiting`.
+     */
+    var `myCode`: kotlin.String
+    , 
+    /**
+     * Seconds until a reset completes (while `Resetting`).
+     */
+    var `resetWait`: kotlin.ULong
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountReport: FfiConverterRustBuffer<AccountReport> {
+    override fun read(buf: ByteBuffer): AccountReport {
+        return AccountReport(
+            FfiConverterString.read(buf),
+            FfiConverterTypeAccountStatus.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeAccountDevice.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceTypeJoinRequest.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AccountReport) = (
+            FfiConverterString.allocationSize(value.`state`) +
+            FfiConverterTypeAccountStatus.allocationSize(value.`status`) +
+            FfiConverterString.allocationSize(value.`number`) +
+            FfiConverterSequenceTypeAccountDevice.allocationSize(value.`devices`) +
+            FfiConverterSequenceString.allocationSize(value.`revoked`) +
+            FfiConverterSequenceTypeJoinRequest.allocationSize(value.`joins`) +
+            FfiConverterBoolean.allocationSize(value.`resetPending`) +
+            FfiConverterString.allocationSize(value.`myCode`) +
+            FfiConverterULong.allocationSize(value.`resetWait`)
+    )
+
+    override fun write(value: AccountReport, buf: ByteBuffer) {
+            FfiConverterString.write(value.`state`, buf)
+            FfiConverterTypeAccountStatus.write(value.`status`, buf)
+            FfiConverterString.write(value.`number`, buf)
+            FfiConverterSequenceTypeAccountDevice.write(value.`devices`, buf)
+            FfiConverterSequenceString.write(value.`revoked`, buf)
+            FfiConverterSequenceTypeJoinRequest.write(value.`joins`, buf)
+            FfiConverterBoolean.write(value.`resetPending`, buf)
+            FfiConverterString.write(value.`myCode`, buf)
+            FfiConverterULong.write(value.`resetWait`, buf)
+    }
+}
+
+
+
+data class HttpReply (
+    var `status`: kotlin.UShort
+    , 
+    var `body`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHttpReply: FfiConverterRustBuffer<HttpReply> {
+    override fun read(buf: ByteBuffer): HttpReply {
+        return HttpReply(
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HttpReply) = (
+            FfiConverterUShort.allocationSize(value.`status`) +
+            FfiConverterString.allocationSize(value.`body`)
+    )
+
+    override fun write(value: HttpReply, buf: ByteBuffer) {
+            FfiConverterUShort.write(value.`status`, buf)
+            FfiConverterString.write(value.`body`, buf)
+    }
+}
+
+
+
 data class IncomingOffer (
     var `transferId`: kotlin.String
     , 
@@ -2315,6 +3025,65 @@ public object FfiConverterTypeIncomingOffer: FfiConverterRustBuffer<IncomingOffe
 
 
 
+data class JoinRequest (
+    var `rid`: kotlin.String
+    , 
+    var `pk`: kotlin.String
+    , 
+    var `name`: kotlin.String
+    , 
+    /**
+     * Shown on the joining device too; the user compares them before approving.
+     */
+    var `code`: kotlin.String
+    , 
+    /**
+     * Another pending request shows the same code: approving is refused.
+     */
+    var `suspicious`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeJoinRequest: FfiConverterRustBuffer<JoinRequest> {
+    override fun read(buf: ByteBuffer): JoinRequest {
+        return JoinRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: JoinRequest) = (
+            FfiConverterString.allocationSize(value.`rid`) +
+            FfiConverterString.allocationSize(value.`pk`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`code`) +
+            FfiConverterBoolean.allocationSize(value.`suspicious`)
+    )
+
+    override fun write(value: JoinRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`rid`, buf)
+            FfiConverterString.write(value.`pk`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`code`, buf)
+            FfiConverterBoolean.write(value.`suspicious`, buf)
+    }
+}
+
+
+
 data class OfferedFile (
     var `name`: kotlin.String
     , 
@@ -2350,6 +3119,54 @@ public object FfiConverterTypeOfferedFile: FfiConverterRustBuffer<OfferedFile> {
             FfiConverterULong.write(value.`size`, buf)
     }
 }
+
+
+
+
+enum class AccountStatus {
+    
+    /**
+     * Full member: devices, approvals, removal.
+     */
+    MEMBER,
+    /**
+     * Join request posted, waiting for an existing device to approve it.
+     */
+    WAITING,
+    /**
+     * Reset requested; becomes a member when the wait is over.
+     */
+    RESETTING,
+    /**
+     * This device was removed, or the account no longer exists. State was cleared.
+     */
+    REMOVED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAccountStatus: FfiConverterRustBuffer<AccountStatus> {
+    override fun read(buf: ByteBuffer) = try {
+        AccountStatus.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AccountStatus) = 4UL
+
+    override fun write(value: AccountStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 
@@ -2557,6 +3374,62 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeAccountDevice: FfiConverterRustBuffer<List<AccountDevice>> {
+    override fun read(buf: ByteBuffer): List<AccountDevice> {
+        val len = buf.getInt()
+        return List<AccountDevice>(len) {
+            FfiConverterTypeAccountDevice.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<AccountDevice>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeAccountDevice.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<AccountDevice>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeAccountDevice.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeJoinRequest: FfiConverterRustBuffer<List<JoinRequest>> {
+    override fun read(buf: ByteBuffer): List<JoinRequest> {
+        val len = buf.getInt()
+        return List<JoinRequest>(len) {
+            FfiConverterTypeJoinRequest.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<JoinRequest>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeJoinRequest.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<JoinRequest>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeJoinRequest.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeOfferedFile: FfiConverterRustBuffer<List<OfferedFile>> {
     override fun read(buf: ByteBuffer): List<OfferedFile> {
         val len = buf.getInt()
@@ -2578,4 +3451,236 @@ public object FfiConverterSequenceTypeOfferedFile: FfiConverterRustBuffer<List<O
         }
     }
 }
+        /**
+         * Approves a join request (after the user compared the codes). The new device becomes a
+         * member on its next sync.
+         */
+    @Throws(CoreException::class) fun `accountApprove`(`http`: AccountHttp, `state`: kotlin.String, `rid`: kotlin.String, `deviceSeed`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_approve(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),
+        FfiConverterString.lower(`rid`),
+        FfiConverterByteArray.lower(`deviceSeed`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Cancels someone else's reset of our account (a member device).
+         */
+    @Throws(CoreException::class) fun `accountCancelReset`(`http`: AccountHttp, `state`: kotlin.String)
+        = 
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_cancel_reset(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),_status)
+}
+    
+    
+
+        /**
+         * Moves the account to a fresh number (e.g. the old one leaked). Other devices follow on
+         * their next sync; nothing has to be typed again.
+         */
+    @Throws(CoreException::class) fun `accountChangeNumber`(`http`: AccountHttp, `state`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_change_number(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Creates a new account with this device as its only member. `number` may be empty
+         * (a fresh one is generated). Fails if the number is already taken.
+         */
+    @Throws(CoreException::class) fun `accountCreate`(`http`: AccountHttp, `server`: kotlin.String, `number`: kotlin.String, `me`: AccountDevice, `deviceSeed`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_create(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`server`),
+        FfiConverterString.lower(`number`),
+        FfiConverterTypeAccountDevice.lower(`me`),
+        FfiConverterByteArray.lower(`deviceSeed`),_status)
+}
+    )
+    }
+    
+ fun `accountFormatNumber`(`input`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_format_number(
+    
+        
+        FfiConverterString.lower(`input`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Creates a one-time QR invite (10 minutes). Keep syncing while it is on screen: a
+         * device that scanned it is approved automatically.
+         */
+    @Throws(CoreException::class) fun `accountInvite`(`state`: kotlin.String): AccountInvite {
+            return FfiConverterTypeAccountInvite.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_invite(
+    
+        
+        FfiConverterString.lower(`state`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Posts a join request for an existing account. The returned state is `Waiting` until
+         * another device approves; call [`account_sync`] to pick up the approval.
+         * `number` is either the typed number or a scanned invite link.
+         */
+    @Throws(CoreException::class) fun `accountJoin`(`http`: AccountHttp, `server`: kotlin.String, `number`: kotlin.String, `me`: AccountDevice, `deviceSeed`: kotlin.ByteArray): AccountReport {
+            return FfiConverterTypeAccountReport.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_join(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`server`),
+        FfiConverterString.lower(`number`),
+        FfiConverterTypeAccountDevice.lower(`me`),
+        FfiConverterByteArray.lower(`deviceSeed`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Leaves the account: removes this device everywhere. The state should be deleted after.
+         */
+    @Throws(CoreException::class) fun `accountLeave`(`http`: AccountHttp, `state`: kotlin.String, `deviceSeed`: kotlin.ByteArray)
+        = 
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_leave(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),
+        FfiConverterByteArray.lower(`deviceSeed`),_status)
+}
+    
+    
+
+        /**
+         * A fresh random number: 15 uniform digits from the OS CSPRNG plus a Luhn digit.
+         */ fun `accountNewNumber`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_new_number(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * 16 digits, Luhn-checked (catches typos before any network round trip).
+         */ fun `accountNumberValid`(`input`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_number_valid(
+    
+        
+        FfiConverterString.lower(`input`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Drops a join request without adding the device.
+         */
+    @Throws(CoreException::class) fun `accountReject`(`http`: AccountHttp, `state`: kotlin.String, `rid`: kotlin.String)
+        = 
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_reject(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),
+        FfiConverterString.lower(`rid`),_status)
+}
+    
+    
+
+        /**
+         * Removes a device from the account and rotates the account keys.
+         */
+    @Throws(CoreException::class) fun `accountRemove`(`http`: AccountHttp, `state`: kotlin.String, `pk`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_remove(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),
+        FfiConverterString.lower(`pk`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * With no device left to approve: claims the account with the number alone. Every
+         * device still on the account sees `reset_pending` and can cancel during the wait.
+         */
+    @Throws(CoreException::class) fun `accountResetStart`(`http`: AccountHttp, `server`: kotlin.String, `number`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_reset_start(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`server`),
+        FfiConverterString.lower(`number`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Refreshes the account: picks up approvals, new or removed devices, join requests, a
+         * changed number and our own reachability (`me`), which is written back when it changed.
+         */
+    @Throws(CoreException::class) fun `accountSync`(`http`: AccountHttp, `state`: kotlin.String, `me`: AccountDevice, `deviceSeed`: kotlin.ByteArray): AccountReport {
+            return FfiConverterTypeAccountReport.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.uniffi_omasend_core_fn_func_account_sync(
+    
+        
+        FfiConverterTypeAccountHttp.lower(`http`),
+        FfiConverterString.lower(`state`),
+        FfiConverterTypeAccountDevice.lower(`me`),
+        FfiConverterByteArray.lower(`deviceSeed`),_status)
+}
+    )
+    }
+    
+
 
