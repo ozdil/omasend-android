@@ -383,6 +383,8 @@ class OmaSendClient(private val context: Context) {
                     "ACCEPTED" -> return Result.success(true)
                     "REJECTED" -> return Result.failure(Exception("Transfer was declined by recipient."))
                     "EXPIRED" -> return Result.failure(Exception("Transfer request expired."))
+                    "NOT_FOUND" -> return Result.failure(Exception("The recipient no longer has this transfer request."))
+                    "" -> if (decision.error != null) return Result.failure(Exception(decision.error))
                     else -> {
                         // Still PENDING, wait and poll again
                     }

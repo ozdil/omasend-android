@@ -58,7 +58,9 @@ data class TransferResponse(
 
 @Serializable
 data class TransferDecision(
-    val status: String
+    // Refusals (auth, rate limits) carry only "error".
+    val status: String = "",
+    val error: String? = null
 )
 
 @Serializable
