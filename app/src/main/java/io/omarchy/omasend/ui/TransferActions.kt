@@ -61,8 +61,7 @@ suspend fun sendMultipleUrisToPeer(
             val requestResult = app.client.sendTransferRequestWithStatus(
                 targetIp = peer.ip,
                 targetPort = peer.port,
-                files = fileInfos,
-                targetOmaId = peer.omaId
+                files = fileInfos
             )
 
             val (token, initialStatus) = requestResult.getOrElse {
@@ -163,8 +162,7 @@ suspend fun sendFileUriToPeer(
             val requestResult = app.client.sendTransferRequestWithStatus(
                 targetIp = peer.ip,
                 targetPort = peer.port,
-                files = listOf(fileInfo),
-                targetOmaId = peer.omaId
+                files = listOf(fileInfo)
             )
 
             val (token, initialStatus) = requestResult.getOrElse {
@@ -257,7 +255,7 @@ suspend fun sendClipboardToPeer(
         val result = if (key != null) {
             io.omarchy.omasend.network.CoreNode.sendClipboard(key, text, peer.ip)
         } else {
-            app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
+            app.client.sendClipboard(peer.ip, peer.port, text)
         }
         withContext(Dispatchers.Main) {
             if (result.isSuccess) {

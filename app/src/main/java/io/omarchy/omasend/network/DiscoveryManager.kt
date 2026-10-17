@@ -645,7 +645,8 @@ class DiscoveryManager(private val context: Context) {
     fun addManualPeer(ip: String, port: Int = NetworkUtils.PORT, name: String = "Direct ($ip)", omaId: String = "") {
         val cleanIp = ip.trim()
         val hasValidOmaId = OmaIdentity.isValid(omaId)
-        if (!NetworkUtils.isPrivateOrLocalIp(cleanIp) && !hasValidOmaId) return
+        // Plain HTTP is LAN-only; an OmaID (public) does not make an Internet address safe.
+        if (!NetworkUtils.isPrivateOrLocalIp(cleanIp)) return
         val formattedOma = if (hasValidOmaId) OmaIdentity.format(omaId) else ""
         val myOmaId = getMyOmaId()
         val isSameOwner = hasValidOmaId && myOmaId.isNotBlank() && OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(formattedOma)

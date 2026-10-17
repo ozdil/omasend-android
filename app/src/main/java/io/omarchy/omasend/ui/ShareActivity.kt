@@ -198,7 +198,7 @@ class ShareActivity : ComponentActivity() {
                 // QR-paired devices: encrypted QUIC only. Others: legacy HTTP.
                 val key = CoreNode.trustedKeyFor(this@ShareActivity, peer)
                 val res = if (key != null) CoreNode.sendClipboard(key, text, peer.ip)
-                else app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
+                else app.client.sendClipboard(peer.ip, peer.port, text)
                 withContext(Dispatchers.Main) {
                     if (res.isSuccess) {
                         app.soundEngine.playSendSound()

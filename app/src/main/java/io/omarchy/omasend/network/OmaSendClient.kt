@@ -83,7 +83,22 @@ class OmaSendClient(private val context: Context) {
         }
     }
 
+    /**
+     * Plain HTTP must never leave the local network. Every request (transfers, clipboard,
+     * pairing, linking, roster sync) is checked here, so no call site can forget it: only
+     * loopback, RFC 1918, link-local and IPv6 ULA/link-local literals are allowed. Hostnames
+     * (other than "localhost") are refused, so DNS cannot point a request at the Internet.
+     */
+    private val lanOnlyInterceptor = Interceptor { chain ->
+        val host = chain.request().url.host
+        if (!NetworkUtils.isPrivateOrLocalIp(host)) {
+            throw java.io.IOException("Refusing plain HTTP to $host: only local network addresses are allowed")
+        }
+        chain.proceed(chain.request())
+    }
+
     private val client = OkHttpClient.Builder()
+        .addInterceptor(lanOnlyInterceptor)
         .addInterceptor(v2SigningInterceptor)
         .socketFactory(HighPerfSocketFactory())
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -97,28 +112,8 @@ class OmaSendClient(private val context: Context) {
         .writeTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    private fun getLocalOmaId(): String {
-        return try {
-            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-            app?.omaIdentity?.formattedId ?: io.omarchy.omasend.crypto.OmaIdentity.getOrGenerate(context).formattedId
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun isAllowedTarget(targetIp: String, targetOmaId: String? = null, hasActiveToken: Boolean = false): Boolean {
-        if (NetworkUtils.isPrivateOrLocalIp(targetIp)) return true
-        if (hasActiveToken) return true
-        if (!targetOmaId.isNullOrBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(targetOmaId)) return true
-        val localOma = getLocalOmaId()
-        if (localOma.isNotBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(localOma)) {
-            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-            val knownWanPeer = app?.discoveryManager?.peers?.value?.any { it.ip == targetIp } == true ||
-                app?.wanDiscoveryEngine?.status?.value?.rendezvousPeers?.any { it.ip == targetIp } == true
-            if (knownWanPeer) return true
-        }
-        return false
-    }
+    /** Local network (loopback, RFC 1918, link-local, IPv6 ULA) only; see [lanOnlyInterceptor]. */
+    private fun isAllowedTarget(targetIp: String): Boolean = NetworkUtils.isPrivateOrLocalIp(targetIp)
 
     /**
      * Protocol v2 initiator: pair with the device whose QR code (omasend://pair?...) was scanned.
@@ -283,10 +278,9 @@ class OmaSendClient(private val context: Context) {
     fun sendTransferRequest(
         targetIp: String,
         targetPort: Int,
-        files: List<TransferFileInfo>,
-        targetOmaId: String = ""
+        files: List<TransferFileInfo>
     ): Result<String> {
-        return sendTransferRequestWithStatus(targetIp, targetPort, files, targetOmaId).map { it.first }
+        return sendTransferRequestWithStatus(targetIp, targetPort, files).map { it.first }
     }
 
     /**
@@ -296,11 +290,10 @@ class OmaSendClient(private val context: Context) {
     fun sendTransferRequestWithStatus(
         targetIp: String,
         targetPort: Int,
-        files: List<TransferFileInfo>,
-        targetOmaId: String = ""
+        files: List<TransferFileInfo>
     ): Result<Pair<String, String>> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope and not an authenticated OmaID session"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
             val totalBytes = files.sumOf { it.size_bytes }
@@ -351,8 +344,8 @@ class OmaSendClient(private val context: Context) {
         token: String,
         timeoutSec: Int = 30
     ): Result<Boolean> {
-        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         cancelRequested = false
         val deadline = System.currentTimeMillis() + (timeoutSec * 1000L)
@@ -417,9 +410,9 @@ class OmaSendClient(private val context: Context) {
         inputStream: InputStream,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int, speedMBps: Double, etaSeconds: Long) -> Unit
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
+        if (!isAllowedTarget(targetIp)) {
             try { inputStream.close() } catch (_: Exception) {}
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         cancelRequested = false
         val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
@@ -479,11 +472,10 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboard(
         targetIp: String,
         targetPort: Int,
-        text: String,
-        targetOmaId: String = ""
+        text: String
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
             val payload = ClipboardPayload(
@@ -514,11 +506,10 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboardPayload(
         targetIp: String,
         targetPort: Int,
-        payload: ClipboardPayload,
-        targetOmaId: String = ""
+        payload: ClipboardPayload
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
             val fullPayload = payload.copy(
@@ -548,11 +539,10 @@ class OmaSendClient(private val context: Context) {
     fun fetchClipboardImage(
         targetIp: String,
         targetPort: Int,
-        hash: String,
-        targetOmaId: String = ""
+        hash: String
     ): Result<ByteArray> {
-        if (!isAllowedTarget(targetIp, targetOmaId, hasActiveToken = true)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         // The hash comes from the network: only a 64-char hex digest may go into the URL.
         val cleanHash = io.omarchy.omasend.engine.ImageHash.normalize(hash)
