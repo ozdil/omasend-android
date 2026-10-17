@@ -2,15 +2,16 @@ package io.omarchy.omasend.service
 
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import io.omarchy.omasend.MainActivity
 import io.omarchy.omasend.OmaSendApp
 import io.omarchy.omasend.R
@@ -19,41 +20,38 @@ import io.omarchy.omasend.repository.ClipboardVault
 
 class OmaSendForegroundService : Service() {
 
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
-    private var multicastLock: WifiManager.MulticastLock? = null
+    // Power: this service holds no locks. The Wi-Fi lock and a partial wake lock are held only
+    // during transfers (TransferPowerLocks), the multicast lock only while discovery runs
+    // (DiscoveryManager), and discovery stops while the screen is off (screenReceiver).
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-            wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OmaSend::TransferWakeLock")?.apply {
-                setReferenceCounted(false)
-                acquire(10 * 60 * 1000L) // 10 minute ceiling
-            }
-
-            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            if (wifiManager != null) {
-                multicastLock = wifiManager.createMulticastLock("OmaSend::MulticastLock").apply {
-                    setReferenceCounted(false)
-                    acquire()
-                }
-
-                val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-                } else {
-                    @Suppress("DEPRECATION")
-                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
-                }
-                wifiLock = wifiManager.createWifiLock(lockMode, "OmaSend::TransferWifiLock").apply {
-                    setReferenceCounted(false)
-                    acquire()
+            screenReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    val app = applicationContext as? OmaSendApp ?: return
+                    when (intent?.action) {
+                        Intent.ACTION_SCREEN_OFF -> app.discoveryManager.onScreenOff()
+                        Intent.ACTION_SCREEN_ON -> app.discoveryManager.onScreenOn()
+                    }
                 }
             }
+            ContextCompat.registerReceiver(
+                this,
+                screenReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        } catch (_: Exception) {}
 
+        try {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
                 val app = applicationContext as? OmaSendApp ?: OmaSendApp.instance
@@ -124,9 +122,8 @@ class OmaSendForegroundService : Service() {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 clipboard?.removePrimaryClipChangedListener(it)
             }
-            if (wakeLock?.isHeld == true) wakeLock?.release()
-            if (wifiLock?.isHeld == true) wifiLock?.release()
-            if (multicastLock?.isHeld == true) multicastLock?.release()
+            screenReceiver?.let { unregisterReceiver(it) }
+            screenReceiver = null
         } catch (_: Exception) {}
         stopForeground(STOP_FOREGROUND_REMOVE)
     }

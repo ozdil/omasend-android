@@ -413,7 +413,8 @@ class OmaSendClient(private val context: Context) {
         }
         cancelRequested = false
         val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
-        val wifiLock = NetworkUtils.acquireHighPerfWifiLock(context, "OmaSend:ClientUpload")
+        // Wi-Fi + wake locks only for the duration of the upload (released in finally).
+        TransferPowerLocks.begin(context)
         return try {
             val encodedName = URLEncoder.encode(filename, "UTF-8")
             val countingBody = object : RequestBody() {
@@ -430,6 +431,7 @@ class OmaSendClient(private val context: Context) {
                         }
                         sink.write(buffer, 0, read)
                         uploaded += read
+                        TransferPowerLocks.keepAlive()
                         val metrics = speedCalculator.update(uploaded)
                         onProgress(uploaded, totalBytes, metrics.percent, metrics.speedMBps, metrics.etaSeconds)
                     }
@@ -458,7 +460,7 @@ class OmaSendClient(private val context: Context) {
             }
         } finally {
             activeUploadCall = null
-            NetworkUtils.releaseWifiLock(wifiLock)
+            TransferPowerLocks.end()
             try {
                 inputStream.close()
             } catch (_: Exception) {

@@ -563,13 +563,14 @@ class OmaSendServer(private val context: Context) {
         } catch (_: Exception) {}
 
         val (saved, finalName) = try {
-            NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
+            TransferPowerLocks.during(context) {
                 StorageUtils.saveIncomingStream(
                     context = context,
                     filename = filename,
                     inputStream = input,
                     totalBytes = contentLength,
-                    deadlineMs = uploadDeadline
+                    deadlineMs = uploadDeadline,
+                    onProgress = { _, _ -> TransferPowerLocks.keepAlive() }
                 )
             }
         } catch (t: Throwable) {

@@ -63,6 +63,8 @@ object CoreNode {
     private var app: OmaSendApp? = null
 
     private val quicOffers = ConcurrentHashMap.newKeySet<String>()
+    /** Incoming QUIC transfers currently holding [TransferPowerLocks]. */
+    private val quicReceiving = ConcurrentHashMap.newKeySet<String>()
     private val sendListeners = ConcurrentHashMap<String, (String, Long, Long) -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 
@@ -287,6 +289,7 @@ object CoreNode {
             var speedFile = ""
             var speed: TransferSpeedCalculator? = null
             sendListeners[id] = { file, done, total ->
+                TransferPowerLocks.keepAlive()
                 val calc = speed?.takeIf { speedFile == file }
                     ?: TransferSpeedCalculator(total).also { speed = it; speedFile = file }
                 val m = calc.update(done)
@@ -297,10 +300,13 @@ object CoreNode {
                     main.post { onState(TransferProgressState.Transferring(true, key.name, file, done, total, pct, m.speedMBps, m.etaSeconds)) }
                 }
             }
+            // Wi-Fi + wake locks only while the files are actually moving.
+            TransferPowerLocks.begin(context)
             try {
                 n.sendFiles(key.pk, addrs, paths, names, id)
             } finally {
                 sendListeners.remove(id)
+                TransferPowerLocks.end()
             }
             withContext(Dispatchers.Main) {
                 app.soundEngine.playSendSound()
@@ -363,7 +369,14 @@ object CoreNode {
         }
 
         override fun progress(transferId: String, direction: Direction, fileName: String, done: ULong, total: ULong) {
-            if (direction == Direction.SEND) sendListeners[transferId]?.invoke(fileName, done.toLong(), total.toLong())
+            if (direction == Direction.SEND) {
+                sendListeners[transferId]?.invoke(fileName, done.toLong(), total.toLong())
+            } else if (quicReceiving.add(transferId)) {
+                // First progress of an accepted incoming transfer: hold the locks until it finishes.
+                TransferPowerLocks.begin(app)
+            } else {
+                TransferPowerLocks.keepAlive()
+            }
         }
 
         override fun fileReceived(transferId: String, peerPk: String, path: String) {
@@ -401,6 +414,7 @@ object CoreNode {
 
         override fun transferFinished(transferId: String, direction: Direction, ok: Boolean, error: String?) {
             quicOffers.remove(transferId)
+            if (quicReceiving.remove(transferId)) TransferPowerLocks.end()
             if (!ok) Log.i(TAG, "transfer $transferId ($direction) failed: $error")
         }
 
