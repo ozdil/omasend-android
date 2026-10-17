@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,7 +175,9 @@ fun HomeScreen(app: OmaSendApp, onOpenSettings: () -> Unit) {
                         Image(
                             painter = painterResource(R.drawable.omasend_mark),
                             contentDescription = null,
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(30.dp),
+                            // Monochrome mark that follows the theme (light text colour on dark, dark on light).
+                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {

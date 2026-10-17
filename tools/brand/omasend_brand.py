@@ -224,6 +224,9 @@ def svg_word(text, colors, cell=15, height=None, pad=0, bg=None):
     return s+'</svg>', W, H
 
 BG='#1a1b26';G='#9ece6a';BL='#7aa2f7';FG='#c0caf5';LIGHT='#f5f5f0';INK='#1a1b26';LBL='#2e7de9'
+# Monochrome palette (2026-10-17, chosen by the owner): one light grey on the app's background.
+if os.environ.get('OMASEND_PALETTE')=='mono':
+    BG='#0d1117';G='#e6edf3';BL='#e6edf3';FG='#e6edf3'
 A3="""..#####
 ....###
 ...##.#

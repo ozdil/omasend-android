@@ -15,8 +15,8 @@ android {
         applicationId = "io.omarchy.omasend"
         minSdk = 26
         targetSdk = 36
-        versionCode = 106
-        versionName = "2.0.6"
+        versionCode = 107
+        versionName = "2.0.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
