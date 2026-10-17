@@ -22,7 +22,7 @@ This document contains all official store metadata, textual assets, and regulato
 
 ## 2. Store Descriptions
 
-Written for 2.0.8 (OmaID account, internet relay, shared clipboard, mono UI). Do not publish this text with an older build.
+Written for 2.0.9 (OmaID account, internet relay, shared clipboard, mono UI). Do not publish this text with an older build.
 
 ### English (en-US)
 
@@ -109,7 +109,7 @@ Google Play Console'da "Data safety" (Veri güvenliği) adımı için resmi yan�
 2. **Is all of the user data collected by your app encrypted in transit?**
    - Answer: **NOT APPLICABLE** (No data is collected by the developer or transmitted to developer servers).
 3. **Do you provide a way for users to request that their data be deleted?**
-   - Answer: **NOT APPLICABLE** for collected data. Since 2.0.8 the optional OmaID registry entry holds only end-to-end encrypted data the developer cannot read; removing the last device from an account deletes it.
+   - Answer: **NOT APPLICABLE** for collected data. Since 2.0.9 the optional OmaID registry entry holds only end-to-end encrypted data the developer cannot read; removing the last device from an account deletes it.
 4. **Is your app target audience including children?**
    - Answer: **NO** (Ages 13+).
 
@@ -131,11 +131,11 @@ Matches `app/src/main/AndroidManifest.xml`. OmaSend declares no Bluetooth or loc
 
 ## 5. Network Use (for the Data safety form and the description)
 
-As of 2.0.8:
+As of 2.0.9:
 
 - **Local network:** discovery on UDP 53317; transfers over legacy HTTP on TCP 53317, or end-to-end encrypted QUIC (TLS 1.3) on UDP 53318 for QR-paired devices.
 - **Internet path (only with an OmaID account):** devices on the same account connect through iroh relays when they are not on the same network. Relays forward only encrypted QUIC traffic and see the devices' IP addresses.
 - **OmaID registry (`id.omaid.app`, only with an account):** stores an Argon2-derived account id and the device list, encrypted and Ed25519-signed on the devices. The 16-digit number itself is never sent.
-- **STUN:** disabled since 2.0.8 (the WAN rendezvous engine no longer runs).
+- **STUN:** disabled since 2.0.9 (the WAN rendezvous engine no longer runs).
 - **Limits:** up to 10 GiB per file.
 - Because of the relay and the registry, claims such as "no servers" or "zero cloud contact" must not be used.
