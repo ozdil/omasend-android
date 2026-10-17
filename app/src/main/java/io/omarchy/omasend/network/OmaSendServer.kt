@@ -245,21 +245,10 @@ class OmaSendServer(private val context: Context) {
 
     var getDiscoveryMode: (() -> io.omarchy.omasend.model.DiscoveryMode)? = null
 
-    // V2-SEC-01 interim fix: OmaID is broadcast in beacons and headers, so a claimed OmaID
-    // (including our own) proves nothing. Only explicitly paired OmaIDs count here.
-    private fun isPairedOrKnownOmaId(candidate: String?): Boolean {
-        if (candidate.isNullOrBlank()) return false
-        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-        return app?.discoveryManager?.isOmaIdPaired(candidate) == true
-    }
-
-    // Paired OmaID AND the request comes from the IP stored at pairing time.
-    private fun isPairedOmaIdAtIp(candidate: String?, peerIp: String): Boolean {
-        if (candidate.isNullOrBlank() || peerIp.isBlank()) return false
-        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-        val savedIp = app?.discoveryManager?.getPairedIp(candidate) ?: return false
-        return savedIp == peerIp
-    }
+    // The legacy OmaID is public (it used to be broadcast in beacons, ping responses and every
+    // request header), so a claimed OmaID never authorizes anything here. Authorization comes
+    // only from v2 signatures by a QR-paired device key, the QUIC core's pinned keys, the PIN or
+    // the session key, or the user's explicit consent to a transfer prompt.
 
     private fun handleClient(socket: Socket, peerIp: String) {
         try {
@@ -347,7 +336,7 @@ class OmaSendServer(private val context: Context) {
             }
 
             // Early Visibility Check: reject connections if visibility is turned OFF.
-            // V2-SEC-01: a claimed same-owner OmaID no longer bypasses this.
+            // A claimed OmaID never bypasses this.
             val currentMode = getDiscoveryMode?.invoke()
             if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF &&
                 path != "/api/status" && path != "/api/v2/pair"
@@ -427,28 +416,14 @@ class OmaSendServer(private val context: Context) {
             val req = json.decodeFromString<TransferRequest>(bodyJson)
             val token = UUID.randomUUID().toString().replace("-", "")
 
-            val headerOmaId = headers["x-omasend-omaid"]
-            val senderOmaId = when {
-                !headerOmaId.isNullOrBlank() -> headerOmaId
-                req.oma_id.isNotBlank() -> req.oma_id
-                io.omarchy.omasend.crypto.OmaIdentity.isValid(req.sender_id) -> req.sender_id
-                else -> ""
-            }
-
-            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
-
             val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
             if (v2 is DeviceKey.AuthResult.Rejected) {
                 sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
                 return
             }
             val verifiedKey = (v2 as? DeviceKey.AuthResult.Trusted)?.key
-
-            // Reject unauthenticated WAN transfer requests unless verified device key or paired OmaID
-            if (!isPrivatePeer && verifiedKey == null && !isPairedOrKnownOmaId(senderOmaId)) {
-                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"WAN transfer requires verified OmaID\"}")
-                return
-            }
+            // Unsigned (or unknown-key) requests from the LAN still reach the user as a prompt;
+            // nothing is accepted without either a paired own-device key or the user's consent.
 
             if (!StorageUtils.hasEnoughStorageSpace(context, req.total_size_bytes)) {
                 sendResponse(output, 507, "Insufficient Storage", "application/json", "{\"error\":\"Insufficient storage space on device\"}")
@@ -814,14 +789,8 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        // 3. Authenticate and Authorize (including Anonymous Numbered OmaID Zero-Click check)
-        val headerOmaId = headers["x-omasend-omaid"]
-        val candidateOmaId = when {
-            !headerOmaId.isNullOrBlank() -> headerOmaId
-            payload.oma_id.isNotBlank() -> payload.oma_id
-            io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
-            else -> ""
-        }
+        // 3. Authenticate and authorize: v2 device key, PIN or session key. A claimed OmaID or
+        // sender_id (both public) never authorizes a clipboard write.
         // A15: secrets are accepted only in headers or the JSON body, never in the URL query
         // (neither the desktop nor the Android client sends them there; URLs end up in logs).
         val providedPin = headers["x-omasend-pin"] ?: payload.pin
@@ -838,10 +807,6 @@ class OmaSendServer(private val context: Context) {
         val isPinValid = !providedPin.isNullOrBlank() && constantTimeEquals(providedPin, expectedPin)
         val isKeyValid = !providedKey.isNullOrBlank() && constantTimeEquals(providedKey, expectedSessionKey)
 
-        // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
-        // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
-        val isPairedPeer = isPairedOmaIdAtIp(candidateOmaId, peerIp)
-
         val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
         if (v2 is DeviceKey.AuthResult.Rejected) {
             sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
@@ -849,7 +814,7 @@ class OmaSendServer(private val context: Context) {
         }
         val isVerifiedDevice = v2 is DeviceKey.AuthResult.Trusted
 
-        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid
+        val isAuthorized = isVerifiedDevice || isPinValid || isKeyValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -867,7 +832,7 @@ class OmaSendServer(private val context: Context) {
                     401,
                     "Unauthorized",
                     "application/json",
-                    "{\"error\":\"Unauthorized clipboard write: paired device key, paired OmaID, PIN or session key required\"}"
+                    "{\"error\":\"Unauthorized clipboard write: paired device key, PIN or session key required\"}"
                 )
             }
             return
@@ -913,9 +878,10 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handleClipboardImageDownload(output: OutputStream, headers: Map<String, String>, query: String, peerIp: String) {
-        val headerOmaId = headers["x-omasend-omaid"]
-        if (!NetworkUtils.isPrivateOrLocalIp(peerIp) && !isPairedOrKnownOmaId(headerOmaId)) {
-            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN image request\"}")
+        // LAN-only (enforced in handleClient); the SHA-256 in the URL is the capability. A claimed
+        // OmaID header no longer opens this to the Internet.
+        if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized image request\"}")
             return
         }
 

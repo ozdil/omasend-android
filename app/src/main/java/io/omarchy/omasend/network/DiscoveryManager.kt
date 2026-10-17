@@ -445,7 +445,6 @@ class DiscoveryManager(private val context: Context) {
             if (myIp != "127.0.0.1") {
                 try {
                     val socket = DatagramSocket().apply { broadcast = true }
-                    val myOmaId = getMyOmaId()
                     val beacon = P2pBeaconPacket(
                         magic = "OMASEND_P2P",
                         v = 1,
@@ -454,8 +453,9 @@ class DiscoveryManager(private val context: Context) {
                         ip = myIp,
                         port = NetworkUtils.PORT,
                         mode = _discoveryMode.value.wireMode,
-                        oma_id = myOmaId,
-                        fp = myOmaId,
+                        // The legacy OmaID is public and proves nothing: never broadcast it.
+                        oma_id = "",
+                        fp = "",
                         pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
@@ -576,7 +576,6 @@ class DiscoveryManager(private val context: Context) {
             if (myIp != "127.0.0.1") {
                 try {
                     val socket = DatagramSocket().apply { broadcast = true }
-                    val myOmaId = getMyOmaId()
                     val beacon = P2pBeaconPacket(
                         magic = "OMASEND_P2P",
                         v = 1,
@@ -585,8 +584,9 @@ class DiscoveryManager(private val context: Context) {
                         ip = myIp,
                         port = NetworkUtils.PORT,
                         mode = "OFF",
-                        oma_id = myOmaId,
-                        fp = myOmaId,
+                        // The legacy OmaID is public and proves nothing: never broadcast it.
+                        oma_id = "",
+                        fp = "",
                         pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
@@ -701,11 +701,6 @@ class DiscoveryManager(private val context: Context) {
                         if (beacon != null) {
                             val myId = NetworkUtils.getDeviceId(context)
                             val myIp = NetworkUtils.getLocalIpAddress()
-                            val myOmaId = getMyOmaId()
-                            val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
-
-                            val isSameOwner = myOmaId.isNotBlank() && peerOmaId.isNotBlank() &&
-                                OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
                             val isSelfDevice = beacon.id == myId || (beacon.ip == myIp && beacon.id == myId)
 
                             if (!isSelfDevice) {
@@ -719,22 +714,24 @@ class DiscoveryManager(private val context: Context) {
                                 }
 
                                 val senderIp = packetAddr.hostAddress ?: beacon.ip
-                                val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
+                                val isTrustedPeer = isPeerTrusted(beacon.id)
 
-                                // V2-SEC-03 interim fix: beacons are unauthenticated, so they must not
-                                // overwrite the stored IP/name of a paired OmaID (traffic redirection).
-
-                                val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
+                                // V2-SEC-03: beacons are unauthenticated, so they must not overwrite the
+                                // stored IP/name of a paired OmaID (traffic redirection). A beacon's
+                                // claimed OmaID (public, trivially spoofed) is ignored entirely: it
+                                // neither marks a peer as "same owner" nor as trusted. Only the
+                                // advertised device key (pk) is kept, as an address hint for QUIC,
+                                // which verifies the key itself.
                                 val peer = DiscoveredPeer(
                                     id = beacon.id,
                                     name = beacon.name,
                                     ip = senderIp,
                                     port = beacon.port,
                                     transport = "LAN",
-                                    omaId = formattedPeerOma,
-                                    fingerprint = formattedPeerOma,
+                                    omaId = "",
+                                    fingerprint = "",
                                     isTrusted = isTrustedPeer,
-                                    isSameOwner = isSameOwner,
+                                    isSameOwner = false,
                                     lastSeen = System.currentTimeMillis(),
                                     pk = beacon.pk.takeIf { io.omarchy.omasend.crypto.DeviceKey.decodePk(it) != null } ?: ""
                                 )
@@ -769,7 +766,6 @@ class DiscoveryManager(private val context: Context) {
                 while (isActive) {
                     val myIp = NetworkUtils.getLocalIpAddress()
                     if (myIp != "127.0.0.1") {
-                        val myOmaId = getMyOmaId()
                         val beacon = P2pBeaconPacket(
                             magic = "OMASEND_P2P",
                             v = 1,
@@ -778,8 +774,9 @@ class DiscoveryManager(private val context: Context) {
                             ip = myIp,
                             port = NetworkUtils.PORT,
                             mode = _discoveryMode.value.wireMode,
-                            oma_id = myOmaId,
-                            fp = myOmaId,
+                            // The legacy OmaID is public and proves nothing: never broadcast it.
+                            oma_id = "",
+                            fp = "",
                             pk = myPk()
                         )
                         val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)

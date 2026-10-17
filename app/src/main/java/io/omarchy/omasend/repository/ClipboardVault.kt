@@ -417,30 +417,15 @@ class ClipboardVault private constructor(private val context: Context) {
             val deviceName = NetworkUtils.getDeviceName(context)
             addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
 
-            // Automatic clipboard sync:
-            //  - the user's OWN QR-paired devices, over encrypted QUIC only (never downgraded);
-            //  - legacy code-paired OmaIDs at the IP stored when they were paired (HTTP, as before),
-            //    unless that peer is a QR-paired device.
-            // Devices paired as someone else's never receive automatic pushes. Beacons are
-            // unauthenticated, so beacon-derived "same owner" never authorizes a push.
-            val keys = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load()
-            val ownKeys = keys.filter { it.own_device }
-            val peers = app.discoveryManager.peers.value
-            val legacyPeers = peers.filter { peer ->
-                peer.omaId.isNotBlank() &&
-                    app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true &&
-                    io.omarchy.omasend.network.CoreNode.keyFor(keys, peer) == null
-            }.distinctBy { it.ip }
-            if (legacyPeers.isNotEmpty() || ownKeys.isNotEmpty()) {
+            // Automatic clipboard sync goes only to the user's OWN QR-paired devices, over
+            // encrypted QUIC (never downgraded). The former push to legacy code-paired OmaIDs over
+            // plain HTTP is disabled: that pairing rests on the public OmaID alone, so nothing
+            // authenticates whoever answers at the stored address.
+            val ownKeys = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load().filter { it.own_device }
+            if (ownKeys.isNotEmpty()) {
                 scope.launch {
                     for (k in ownKeys) {
                         io.omarchy.omasend.network.CoreNode.sendClipboard(k, text)
-                    }
-                    for (peer in legacyPeers) {
-                        if (peer.transport == "BT" || peer.ip.startsWith("bt:") || peer.port <= 0) continue
-                        try {
-                            app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
-                        } catch (_: Exception) {}
                     }
                 }
             }
