@@ -114,7 +114,7 @@ fun TransferStatusCard(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 when (state) {
-                    is TransferProgressState.Success -> Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Emerald, modifier = Modifier.size(22.dp))
+                    is TransferProgressState.Success -> Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Ink, modifier = Modifier.size(22.dp))
                     is TransferProgressState.Error -> Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
                     is TransferProgressState.Transferring -> Text(
                         "%${state.percent}",
@@ -207,14 +207,14 @@ fun IncomingTransferDialog(
                     Icon(
                         if (encrypted) Icons.Default.Lock else Icons.Default.LockOpen,
                         contentDescription = null,
-                        tint = if (encrypted) Emerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (encrypted) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         if (encrypted) OmaI18n.t("incoming_encrypted") else OmaI18n.t("incoming_unencrypted"),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (encrypted) Emerald else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (encrypted) Ink else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Spacer(modifier = Modifier.height(14.dp))

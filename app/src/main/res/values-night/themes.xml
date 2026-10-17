@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Dark window behind the first Compose frame, so a dark phone never flashes white. -->
+    <style name="Theme.OmaSend" parent="android:Theme.Material.NoActionBar" />
+</resources>
