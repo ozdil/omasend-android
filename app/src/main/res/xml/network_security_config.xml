@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext HTTP streaming for local network P2P transfers -->
+    <!--
+        Cleartext HTTP is needed for the legacy LAN transfer protocol (port 53317), whose peers
+        are addressed by IP literal. Network security config can only scope cleartext by domain
+        name, not by IP range, so it stays permitted here. The restriction is enforced in code:
+        OmaSendClient refuses (lanOnlyInterceptor) any request whose host is not a loopback,
+        RFC 1918, link-local or IPv6 ULA/link-local address, and OmaSendServer drops non-local
+        peers on accept. The only other HTTP request is the OmaID account registry
+        (https://id.omaid.app), made by account/AccountHttpClient, which refuses non-HTTPS URLs.
+    -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

@@ -55,6 +55,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- OmaID account invites (QR): https://omaid.app/j#n=<number>&k=<key>. The
+                 fragment never reaches a web server; the app joins only after the user confirms. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="omaid.app"
+                    android:pathPrefix="/j" />
+            </intent-filter>
         </activity>
 
         <!-- System Share Sheet Target: Share files or text directly to OmaSend -->
@@ -74,6 +85,26 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- Shares the clipboard with the user's own devices: needs focus for a moment to read it. -->
+        <activity
+            android:name=".clipboard.ClipboardShareActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OmaSend.Invisible" />
+
+        <service
+            android:name=".clipboard.ClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_omasend"
+            android:label="@string/clip_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".service.OmaSendForegroundService"

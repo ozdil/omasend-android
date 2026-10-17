@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import io.omarchy.omasend.crypto.DeviceKey
+import io.omarchy.omasend.crypto.OmaLink
 import io.omarchy.omasend.model.ClipboardPayload
 import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.model.TransferRequest
@@ -15,7 +16,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -176,14 +182,21 @@ class OmaSendServer(private val context: Context) {
                     } catch (_: Exception) {
                         break
                     }
-                    NetworkUtils.configureHighThroughputSocket(clientSocket)
-
+                    // The listener binds every interface (IPv4 and IPv6) and speaks plain HTTP, so a
+                    // phone with a public IPv6 address would be reachable from the Internet. Only
+                    // loopback, RFC 1918, link-local and IPv6 ULA peers are served; anything else is
+                    // dropped before a single byte is read.
                     val remoteAddr = clientSocket.inetAddress
-                    if (remoteAddr == null) {
+                    if (remoteAddr == null || !NetworkUtils.isPrivateOrLocalAddress(remoteAddr)) {
                         try { clientSocket.close() } catch (_: Exception) {}
                         continue
                     }
                     val peerIp = remoteAddr.hostAddress ?: ""
+                    if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+                        try { clientSocket.close() } catch (_: Exception) {}
+                        continue
+                    }
+                    NetworkUtils.configureHighThroughputSocket(clientSocket)
 
                     // Strict Global Concurrency Limit BEFORE launching work
                     if (activeGlobalConnections.get() >= MAX_GLOBAL_CONNECTIONS) {
@@ -232,21 +245,10 @@ class OmaSendServer(private val context: Context) {
 
     var getDiscoveryMode: (() -> io.omarchy.omasend.model.DiscoveryMode)? = null
 
-    // V2-SEC-01 interim fix: OmaID is broadcast in beacons and headers, so a claimed OmaID
-    // (including our own) proves nothing. Only explicitly paired OmaIDs count here.
-    private fun isPairedOrKnownOmaId(candidate: String?): Boolean {
-        if (candidate.isNullOrBlank()) return false
-        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-        return app?.discoveryManager?.isOmaIdPaired(candidate) == true
-    }
-
-    // Paired OmaID AND the request comes from the IP stored at pairing time.
-    private fun isPairedOmaIdAtIp(candidate: String?, peerIp: String): Boolean {
-        if (candidate.isNullOrBlank() || peerIp.isBlank()) return false
-        val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-        val savedIp = app?.discoveryManager?.getPairedIp(candidate) ?: return false
-        return savedIp == peerIp
-    }
+    // The legacy OmaID is public (it used to be broadcast in beacons, ping responses and every
+    // request header), so a claimed OmaID never authorizes anything here. Authorization comes
+    // only from v2 signatures by a QR-paired device key, the QUIC core's pinned keys, the PIN or
+    // the session key, or the user's explicit consent to a transfer prompt.
 
     private fun handleClient(socket: Socket, peerIp: String) {
         try {
@@ -326,21 +328,15 @@ class OmaSendServer(private val context: Context) {
 
             val contentLength = headers["content-length"]?.toLongOrNull() ?: 0L
 
-            // Check network scope: allow private/local IPs or WAN connections carrying valid OmaID / active token
-            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
-            val headerOmaId = headers["x-omasend-omaid"] ?: getQueryParam(query, "oma_id").ifBlank { null }
-            val queryToken = getQueryParam(query, "token").ifBlank { null }
-            val hasValidActiveToken = queryToken != null && pendingTransfers.isActive(queryToken)
-
-            if (!isPrivatePeer && !isPairedOrKnownOmaId(headerOmaId) && !hasValidActiveToken &&
-                method != "POST" // POST /api/p2p/request and /api/p2p/clipboard may carry oma_id inside JSON body
-            ) {
-                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN origin\"}")
+            // LAN-only, for every method: the accept loop already drops non-local peers; this
+            // second check keeps handleClient safe if it is ever reached another way.
+            if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Only local network peers are served\"}")
                 return
             }
 
             // Early Visibility Check: reject connections if visibility is turned OFF.
-            // V2-SEC-01: a claimed same-owner OmaID no longer bypasses this.
+            // A claimed OmaID never bypasses this.
             val currentMode = getDiscoveryMode?.invoke()
             if (currentMode == io.omarchy.omasend.model.DiscoveryMode.OFF &&
                 path != "/api/status" && path != "/api/v2/pair"
@@ -357,6 +353,19 @@ class OmaSendServer(private val context: Context) {
                 }
                 method == "POST" && path == "/api/v2/pair" -> {
                     handlePairV2(input, output, contentLength, peerIp, remainingDeadline)
+                }
+                method == "POST" && path == "/api/v2/account/sync" -> {
+                    handleAccountSync(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
+                }
+                method == "POST" && (path == "/api/v2/link/start" || path == "/api/v2/link/finish") -> {
+                    if ((context.applicationContext as? io.omarchy.omasend.OmaSendApp)?.account?.hasAccount() == true) {
+                        // With an OmaID account, devices join through the account (approved once
+                        // after comparing a code); the legacy number-based link is switched off.
+                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"This device uses an OmaID account; legacy linking is disabled\"}")
+                    } else {
+                        // Linking is LAN-only (enforced above); visibility OFF was already refused above.
+                        handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
+                    }
                 }
                 method == "POST" && path == "/api/p2p/request" -> {
                     handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
@@ -413,28 +422,14 @@ class OmaSendServer(private val context: Context) {
             val req = json.decodeFromString<TransferRequest>(bodyJson)
             val token = UUID.randomUUID().toString().replace("-", "")
 
-            val headerOmaId = headers["x-omasend-omaid"]
-            val senderOmaId = when {
-                !headerOmaId.isNullOrBlank() -> headerOmaId
-                req.oma_id.isNotBlank() -> req.oma_id
-                io.omarchy.omasend.crypto.OmaIdentity.isValid(req.sender_id) -> req.sender_id
-                else -> ""
-            }
-
-            val isPrivatePeer = NetworkUtils.isPrivateOrLocalIp(peerIp)
-
             val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
             if (v2 is DeviceKey.AuthResult.Rejected) {
                 sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
                 return
             }
             val verifiedKey = (v2 as? DeviceKey.AuthResult.Trusted)?.key
-
-            // Reject unauthenticated WAN transfer requests unless verified device key or paired OmaID
-            if (!isPrivatePeer && verifiedKey == null && !isPairedOrKnownOmaId(senderOmaId)) {
-                sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"WAN transfer requires verified OmaID\"}")
-                return
-            }
+            // Unsigned (or unknown-key) requests from the LAN still reach the user as a prompt;
+            // nothing is accepted without either a paired own-device key or the user's consent.
 
             if (!StorageUtils.hasEnoughStorageSpace(context, req.total_size_bytes)) {
                 sendResponse(output, 507, "Insufficient Storage", "application/json", "{\"error\":\"Insufficient storage space on device\"}")
@@ -574,13 +569,14 @@ class OmaSendServer(private val context: Context) {
         } catch (_: Exception) {}
 
         val (saved, finalName) = try {
-            NetworkUtils.withHighPerfWifiLock(context, "OmaSend:ServerUpload") {
+            TransferPowerLocks.during(context) {
                 StorageUtils.saveIncomingStream(
                     context = context,
                     filename = filename,
                     inputStream = input,
                     totalBytes = contentLength,
-                    deadlineMs = uploadDeadline
+                    deadlineMs = uploadDeadline,
+                    onProgress = { _, _ -> TransferPowerLocks.keepAlive() }
                 )
             }
         } catch (t: Throwable) {
@@ -601,6 +597,7 @@ class OmaSendServer(private val context: Context) {
                     app?.hapticController?.onFileReceivedImpact()
                 } catch (_: Exception) {}
                 onFileReceived?.invoke(finalName, contentLength)
+                app?.notifyFileReceived(finalName)
             }
             val resp = """{"status":"OK","filename":"$finalName","size":$contentLength}"""
             sendResponse(output, 200, "OK", "application/json", resp)
@@ -608,6 +605,105 @@ class OmaSendServer(private val context: Context) {
             state.release(fileIndex)
             sendResponse(output, 500, "Internal Server Error", "application/json", "{\"error\":\"Failed to save file: $finalName\"}")
         }
+    }
+
+    private val linkResponder = OmaLink.Responder()
+
+    /** Own-device roster pushed by a linked device (signed). See OmaLink.applyRoster. */
+    private fun handleAccountSync(
+        input: InputStream,
+        output: OutputStream,
+        headers: Map<String, String>,
+        contentLength: Long,
+        peerIp: String,
+        deadlineMs: Long,
+        pathAndQuery: String
+    ) {
+        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
+        if (body == null) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid or excessive payload\"}")
+            return
+        }
+        val sender = (v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(body), peerIp) as? DeviceKey.AuthResult.Trusted)?.key
+        if (sender == null) {
+            sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signed request from a linked device required\"}")
+            return
+        }
+        val obj = try {
+            json.parseToJsonElement(String(body, Charsets.UTF_8)).jsonObject
+        } catch (_: Exception) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        OmaLink.applyRoster(context, deviceIdentity.publicB64, sender, peerIp, obj)
+            .onSuccess { plan ->
+                if (plan.added.isNotEmpty()) {
+                    Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke(plan.added.joinToString(", ")) }
+                }
+                sendResponse(output, 200, "OK", "application/json", "{\"ok\":true}")
+            }
+            .onFailure {
+                sendResponse(output, 403, "Forbidden", "application/json", buildJsonObject { put("error", it.message ?: "Rejected") }.toString())
+            }
+    }
+
+    private fun handleLink(path: String, input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
+        val body = readBodyBounded(input, contentLength, MAX_CONTROL_BODY.toLong(), deadlineMs)
+        val obj = body?.let {
+            try {
+                json.parseToJsonElement(String(it, Charsets.UTF_8)).jsonObject
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (obj == null) {
+            sendResponse(output, 400, "Bad Request", "application/json", "{\"error\":\"Invalid JSON\"}")
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (path == "/api/v2/link/start") {
+            val pA = (obj["pA"] as? JsonPrimitive)?.contentOrNull
+            val v = (obj["v"] as? JsonPrimitive)?.intOrNull
+            val res = if (v == 1 && pA != null) {
+                linkResponder.start(OmaLink.accountId(context), peerIp, pA, now)
+            } else {
+                OmaLink.StartResult.Bad("Unsupported link request")
+            }
+            when (res) {
+                is OmaLink.StartResult.Ok -> sendResponse(output, 200, "OK", "application/json", res.body.toString())
+                OmaLink.StartResult.RateLimited ->
+                    sendResponse(output, 429, "Too Many Requests", "application/json", "{\"error\":\"Too many link attempts\"}")
+                is OmaLink.StartResult.Bad ->
+                    sendResponse(output, 400, "Bad Request", "application/json", buildJsonObject { put("error", res.message) }.toString())
+            }
+            return
+        }
+        val myQuic = CoreNode.advertisedQuicPort()
+        linkResponder.finish(deviceIdentity, NetworkUtils.getDeviceName(context), myQuic, peerIp, obj, now)
+            .onSuccess { (peer, reply) ->
+                if (OmaLink.isRevoked(context, peer.pk)) {
+                    sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"This device was removed from the account\"}")
+                    return@onSuccess
+                }
+                val ts = DeviceKey.nowSecs()
+                val key = DeviceKey.TrustedKey(
+                    pk = peer.pk,
+                    device_id = DeviceKey.deviceIdForPk(DeviceKey.decodePk(peer.pk)!!),
+                    name = peer.name,
+                    ip = peerIp,
+                    quic_port = peer.quicPort,
+                    own_device = true,
+                    added_at = ts,
+                    last_seen = ts
+                )
+                trustStore.upsert(key)
+                Handler(Looper.getMainLooper()).post { onDevicePaired?.invoke("${key.name} (${key.device_id})") }
+                sendResponse(output, 200, "OK", "application/json", reply.toString())
+                (context.applicationContext as? io.omarchy.omasend.OmaSendApp)?.client?.pushRoster()
+            }
+            .onFailure {
+                sendResponse(output, 403, "Forbidden", "application/json", buildJsonObject { put("error", it.message ?: "Link failed") }.toString())
+            }
     }
 
     private fun handlePairV2(input: InputStream, output: OutputStream, contentLength: Long, peerIp: String, deadlineMs: Long) {
@@ -700,14 +796,8 @@ class OmaSendServer(private val context: Context) {
             return
         }
 
-        // 3. Authenticate and Authorize (including Anonymous Numbered OmaID Zero-Click check)
-        val headerOmaId = headers["x-omasend-omaid"]
-        val candidateOmaId = when {
-            !headerOmaId.isNullOrBlank() -> headerOmaId
-            payload.oma_id.isNotBlank() -> payload.oma_id
-            io.omarchy.omasend.crypto.OmaIdentity.isValid(payload.sender_id) -> payload.sender_id
-            else -> ""
-        }
+        // 3. Authenticate and authorize: v2 device key, PIN or session key. A claimed OmaID or
+        // sender_id (both public) never authorizes a clipboard write.
         // A15: secrets are accepted only in headers or the JSON body, never in the URL query
         // (neither the desktop nor the Android client sends them there; URLs end up in logs).
         val providedPin = headers["x-omasend-pin"] ?: payload.pin
@@ -724,10 +814,6 @@ class OmaSendServer(private val context: Context) {
         val isPinValid = !providedPin.isNullOrBlank() && constantTimeEquals(providedPin, expectedPin)
         val isKeyValid = !providedKey.isNullOrBlank() && constantTimeEquals(providedKey, expectedSessionKey)
 
-        // V2-SEC-01 interim fix: claimed same-owner OmaID and claimed sender_id (both public) no longer
-        // authorize clipboard writes. A paired OmaID must also come from the IP stored at pairing time.
-        val isPairedPeer = isPairedOmaIdAtIp(candidateOmaId, peerIp)
-
         val v2 = v2Verify(headers, "POST", pathAndQuery, DeviceKey.bodyTagJson(bodyBytes), peerIp)
         if (v2 is DeviceKey.AuthResult.Rejected) {
             sendResponse(output, 401, "Unauthorized", "application/json", "{\"error\":\"Signature rejected: ${v2.reason}\"}")
@@ -735,7 +821,7 @@ class OmaSendServer(private val context: Context) {
         }
         val isVerifiedDevice = v2 is DeviceKey.AuthResult.Trusted
 
-        val isAuthorized = isVerifiedDevice || isPairedPeer || isPinValid || isKeyValid
+        val isAuthorized = isVerifiedDevice || isPinValid || isKeyValid
 
         if (!isAuthorized) {
             val notBlocked = recordAuthAttempt(peerIp, false)
@@ -753,7 +839,7 @@ class OmaSendServer(private val context: Context) {
                     401,
                     "Unauthorized",
                     "application/json",
-                    "{\"error\":\"Unauthorized clipboard write: paired device key, paired OmaID, PIN or session key required\"}"
+                    "{\"error\":\"Unauthorized clipboard write: paired device key, PIN or session key required\"}"
                 )
             }
             return
@@ -799,9 +885,10 @@ class OmaSendServer(private val context: Context) {
     }
 
     private fun handleClipboardImageDownload(output: OutputStream, headers: Map<String, String>, query: String, peerIp: String) {
-        val headerOmaId = headers["x-omasend-omaid"]
-        if (!NetworkUtils.isPrivateOrLocalIp(peerIp) && !isPairedOrKnownOmaId(headerOmaId)) {
-            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized WAN image request\"}")
+        // LAN-only (enforced in handleClient); the SHA-256 in the URL is the capability. A claimed
+        // OmaID header no longer opens this to the Internet.
+        if (!NetworkUtils.isPrivateOrLocalIp(peerIp)) {
+            sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"Unauthorized image request\"}")
             return
         }
 

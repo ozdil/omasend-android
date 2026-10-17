@@ -9,10 +9,11 @@ import org.junit.Test
 class NetworkUtilsLocalRangesTest {
 
     @Test
-    fun sharedAddressSpaceIsLocal() {
-        assertTrue(NetworkUtils.isPrivateOrLocalIp("100.64.0.1"))
-        assertTrue(NetworkUtils.isPrivateOrLocalIp("100.127.255.254"))
-        assertTrue(NetworkUtils.isPrivateOrLocalIp("100.100.1.2:53317"))
+    fun carrierGradeNatSpaceIsNotLocal() {
+        // RFC 6598 (100.64.0.0/10) is shared with other carrier subscribers.
+        assertFalse(NetworkUtils.isPrivateOrLocalIp("100.64.0.1"))
+        assertFalse(NetworkUtils.isPrivateOrLocalIp("100.127.255.254"))
+        assertFalse(NetworkUtils.isPrivateOrLocalIp("100.100.1.2:53317"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("100.63.255.255"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("100.128.0.1"))
     }
@@ -37,6 +38,23 @@ class NetworkUtilsLocalRangesTest {
         assertFalse(NetworkUtils.isPrivateOrLocalIp("::ffff:8.8.8.8"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("::"))
         assertFalse(NetworkUtils.isPrivateOrLocalIp("zz::1"))
+    }
+
+    @Test
+    fun inetAddressGate() {
+        fun local(s: String) = NetworkUtils.isPrivateOrLocalAddress(java.net.InetAddress.getByName(s))
+        assertTrue(local("127.0.0.1"))
+        assertTrue(local("::1"))
+        assertTrue(local("192.168.1.5"))
+        assertTrue(local("fe80::1"))
+        assertTrue(local("fd00::1"))
+        assertFalse(local("0.0.0.0"))
+        assertFalse(local("::"))
+        assertFalse(local("100.64.0.1"))
+        assertFalse(local("fec0::1"))
+        assertFalse(local("2001:db8::1"))
+        assertFalse(local("8.8.8.8"))
+        assertFalse(local("224.0.0.251"))
     }
 
     @Test

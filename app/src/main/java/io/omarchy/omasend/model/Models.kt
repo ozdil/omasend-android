@@ -50,14 +50,17 @@ data class TransferRequest(
 
 @Serializable
 data class TransferResponse(
-    val status: String,
+    // Rejections carry only "error"; a missing status must not hide that message.
+    val status: String = "",
     val token: String? = null,
     val error: String? = null
 )
 
 @Serializable
 data class TransferDecision(
-    val status: String
+    // Refusals (auth, rate limits) carry only "error".
+    val status: String = "",
+    val error: String? = null
 )
 
 @Serializable

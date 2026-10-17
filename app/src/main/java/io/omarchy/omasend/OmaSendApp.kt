@@ -1,12 +1,20 @@
 package io.omarchy.omasend
 
+import android.app.Activity
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import io.omarchy.omasend.account.OmaAccount
 import io.omarchy.omasend.audio.OmaSoundEngine
 import io.omarchy.omasend.crypto.OmaIdentity
+import io.omarchy.omasend.model.IncomingTransferPrompt
 import io.omarchy.omasend.network.DiscoveryManager
 import io.omarchy.omasend.network.NetworkConnectivityWatcher
 import io.omarchy.omasend.network.NetworkTransportMode
@@ -14,7 +22,12 @@ import io.omarchy.omasend.network.OmaSendClient
 import io.omarchy.omasend.network.OmaSendServer
 import io.omarchy.omasend.network.WanDiscoveryEngine
 import io.omarchy.omasend.repository.ClipboardVault
+import io.omarchy.omasend.ui.OmaI18n
 import io.omarchy.omasend.ui.haptics.OmaHapticController
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +54,75 @@ class OmaSendApp : Application() {
         private set
     lateinit var networkWatcher: NetworkConnectivityWatcher
         private set
+    /** OmaID account (one number for all of the user's devices). */
+    lateinit var account: OmaAccount
+        private set
+
+    /** Incoming transfer requests waiting for a decision, oldest first. */
+    private val _incomingPrompts = MutableStateFlow<List<IncomingTransferPrompt>>(emptyList())
+    val incomingPrompts: StateFlow<List<IncomingTransferPrompt>> = _incomingPrompts.asStateFlow()
+
+    @Volatile private var resumedActivities = 0
+
+    /** An activity of the app is resumed (on screen). */
+    val isInForeground: Boolean get() = resumedActivities > 0
+
+    /** Removes a prompt once it was answered (or its request is gone) and clears its notification. */
+    fun dismissPrompt(token: String) {
+        _incomingPrompts.update { list -> list.filterNot { it.token == token } }
+        NotificationManagerCompat.from(this).cancel(token.hashCode())
+    }
+
+    private fun onIncomingPrompt(prompt: IncomingTransferPrompt) {
+        _incomingPrompts.update { list -> list.filterNot { it.token == prompt.token } + prompt }
+        if (resumedActivities > 0) return
+        // App in the background: the request would expire unseen, so surface it.
+        val open = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_TRANSFERS)
+            .setSmallIcon(R.drawable.ic_stat_omasend)
+            .setContentTitle(OmaI18n.t("incoming_title"))
+            .setContentText(OmaI18n.f("incoming_request", prompt.senderName))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(this).notify(prompt.token.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // Notification permission not granted; the prompt still waits in the app.
+        }
+    }
+
+    /**
+     * Lasting proof that a file arrived: the sound is skipped in silent mode and the
+     * in-app toast only shows while the app is open. Silent because the sound already played.
+     */
+    fun notifyFileReceived(fileName: String) {
+        val open = PendingIntent.getActivity(
+            this, 1,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_TRANSFERS)
+            .setSmallIcon(R.drawable.ic_stat_omasend)
+            .setContentTitle(OmaI18n.t("file_received_title"))
+            .setContentText(OmaI18n.f("file_received_text", fileName))
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setSilent(true)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(this).notify(NOTIFICATION_RECEIVED_ID, notification)
+        } catch (_: SecurityException) {
+            // Notification permission not granted.
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -58,7 +140,17 @@ class OmaSendApp : Application() {
         discoveryManager = DiscoveryManager(this)
         server = OmaSendServer(this).apply {
             getDiscoveryMode = { discoveryManager.discoveryMode.value }
+            onIncomingTransferPrompt = { onIncomingPrompt(it) }
         }
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) { resumedActivities++ }
+            override fun onActivityPaused(activity: Activity) { resumedActivities-- }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
         client = OmaSendClient(this)
 
         networkWatcher = NetworkConnectivityWatcher(this).apply {
@@ -78,13 +170,18 @@ class OmaSendApp : Application() {
             start()
         }
 
+        // Before the core node: it starts with relays (wan) only when an account exists.
+        account = OmaAccount(this).also { it.start() }
+
         server.start()
         // Phase 2: encrypted QUIC transport for QR-paired devices. Started off the main thread:
         // the device key needs the Android Keystore and the core retries a busy UDP port for
         // several seconds (ANR risk). Users of CoreNode.node handle "not started yet".
         io.omarchy.omasend.network.CoreNode.startAsync(this, appScope)
         discoveryManager.start()
-        wanDiscoveryEngine.start()
+        // WAN rendezvous (keyed by the public OmaID) is disabled; see WanDiscoveryEngine.
+        // Catch up linked devices that missed a link or removal while this app was off.
+        android.os.Handler(mainLooper).postDelayed({ client.pushRoster() }, 10_000L)
     }
 
     fun refreshOmaIdentity(): OmaIdentity {
@@ -127,9 +224,18 @@ class OmaSendApp : Application() {
                 enableVibration(true)
             }
 
+            val accountChannel = NotificationChannel(
+                CHANNEL_ACCOUNT,
+                OmaI18n.t("acct_channel"),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = OmaI18n.t("acct_channel_body")
+            }
+
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(serviceChannel)
             manager.createNotificationChannel(transferChannel)
+            manager.createNotificationChannel(accountChannel)
         }
     }
 
@@ -144,7 +250,9 @@ class OmaSendApp : Application() {
     companion object {
         const val CHANNEL_SERVICE = "omasend_service_channel"
         const val CHANNEL_TRANSFERS = "omasend_transfers_channel"
+        const val CHANNEL_ACCOUNT = "omasend_account_channel"
         const val NOTIFICATION_SERVICE_ID = 1001
+        const val NOTIFICATION_RECEIVED_ID = 1002
 
         lateinit var instance: OmaSendApp
             private set

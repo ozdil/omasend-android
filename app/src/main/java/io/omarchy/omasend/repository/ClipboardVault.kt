@@ -387,64 +387,61 @@ class ClipboardVault private constructor(private val context: Context) {
         return false
     }
 
-    fun processLocalClipboard(context: Context, app: OmaSendApp) {
+    /**
+     * Shares the current clipboard text with the user's own devices. Returns how many devices it
+     * went to, or -1 when there was nothing to share. [force] re-sends text that was already
+     * shared (the Quick Settings tile).
+     */
+    fun processLocalClipboard(context: Context, app: OmaSendApp, force: Boolean = false): Int {
         try {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
-            val clip = clipboard.primaryClip ?: return
-            if (clip.itemCount == 0) return
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return -1
+            val clip = clipboard.primaryClip ?: return -1
+            if (clip.itemCount == 0) return -1
 
             // Sensitive Clipboard Shield: Android 13+ EXTRA_IS_SENSITIVE check
             val desc = clip.description
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 if (desc.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true) {
-                    return
+                    return -1
                 }
             }
 
-            val text = clip.getItemAt(0)?.text?.toString() ?: return
-            if (text.isBlank()) return
+            val text = clip.getItemAt(0)?.text?.toString() ?: return -1
+            if (text.isBlank()) return -1
 
             // Sensitive Clipboard Shield: Pattern heuristics
             if (isSensitivePayload(text)) {
-                return
+                return -1
             }
 
             val hash = computeHash(text)
-            if (!recordIfNew(hash)) {
-                return
+            val isNew = recordIfNew(hash)
+            if (!isNew && !force) {
+                return -1
             }
 
-            val deviceName = NetworkUtils.getDeviceName(context)
-            addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
+            if (isNew) {
+                val deviceName = NetworkUtils.getDeviceName(context)
+                addEntry(text = text, senderName = deviceName, isMine = true, contentType = "text")
+            }
+            io.omarchy.omasend.network.CoreNode.noteLocalClipboard()
 
-            // Automatic clipboard sync:
-            //  - the user's OWN QR-paired devices, over encrypted QUIC only (never downgraded);
-            //  - legacy code-paired OmaIDs at the IP stored when they were paired (HTTP, as before),
-            //    unless that peer is a QR-paired device.
-            // Devices paired as someone else's never receive automatic pushes. Beacons are
-            // unauthenticated, so beacon-derived "same owner" never authorizes a push.
-            val keys = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load()
-            val ownKeys = keys.filter { it.own_device }
-            val peers = app.discoveryManager.peers.value
-            val legacyPeers = peers.filter { peer ->
-                peer.omaId.isNotBlank() &&
-                    app.discoveryManager.getPairedIp(peer.omaId)?.let { it == peer.ip } == true &&
-                    io.omarchy.omasend.network.CoreNode.keyFor(keys, peer) == null
-            }.distinctBy { it.ip }
-            if (legacyPeers.isNotEmpty() || ownKeys.isNotEmpty()) {
+            // Automatic clipboard sync goes only to the user's OWN QR-paired devices, over
+            // encrypted QUIC (never downgraded). The former push to legacy code-paired OmaIDs over
+            // plain HTTP is disabled: that pairing rests on the public OmaID alone, so nothing
+            // authenticates whoever answers at the stored address.
+            val ownKeys = io.omarchy.omasend.crypto.DeviceKey.TrustStore(context).load().filter { it.own_device }
+            if (ownKeys.isNotEmpty()) {
                 scope.launch {
                     for (k in ownKeys) {
                         io.omarchy.omasend.network.CoreNode.sendClipboard(k, text)
                     }
-                    for (peer in legacyPeers) {
-                        if (peer.transport == "BT" || peer.ip.startsWith("bt:") || peer.port <= 0) continue
-                        try {
-                            app.client.sendClipboard(peer.ip, peer.port, text, peer.omaId)
-                        } catch (_: Exception) {}
-                    }
                 }
             }
-        } catch (_: Exception) {}
+            return ownKeys.size
+        } catch (_: Exception) {
+            return -1
+        }
     }
 
     fun clear() {

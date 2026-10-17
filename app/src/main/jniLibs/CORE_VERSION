@@ -3,11 +3,11 @@
 # Verify with: (cd app/src/main/jniLibs && sha256sum -c <(grep -E '^[0-9a-f]{64}  ' CORE_VERSION))
 
 source_repo: omarchy-omasend (desktop repository), crate in core/, built with core/build-android.sh
-source_commit: 5b4479cacd66c750d27910b6901ad6074820e01b
-source_commit_subject: core: retry the well-known QUIC port before falling back to an ephemeral one
+source_commit: 512eb639316d265176cac962fc8ce6a07e2dc483
+source_commit_subject: feat(site): omaid.app pages, privacy policy for accounts and relays
 bindings: app/src/main/java/uniffi/omasend_core/omasend_core.kt (UniFFI, same commit)
 reproducible: no (built by hand; toolchain not pinned, no --remap-path-prefix)
 
-0f21b1f2a84817df39f9d678cc165382b24051d42fa544212cb3a72dab574ff7  arm64-v8a/libomasend_core.so
-8275ef348adc6d0d3ef93ca5084d3afe2c7c5094afa1c1f034e2917792094316  armeabi-v7a/libomasend_core.so
-d0450ae925b68b5472c2dd89c35f148d78a81361791f734e000227835f3352c4  x86_64/libomasend_core.so
+45bbbe26f721bd1ca57d2d579dec9cd59eed7703077cc1a1c788055023bd6c54  arm64-v8a/libomasend_core.so
+4c0c60d645dd159457235fcd6a97dcf14ac9eae76f321980249b40d8110b293d  armeabi-v7a/libomasend_core.so
+34e3fec1331a2e2acab5945588762c5c1f9bbbcc2a361be5b1276970ba7d7132  x86_64/libomasend_core.so

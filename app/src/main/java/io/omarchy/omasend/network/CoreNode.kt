@@ -63,6 +63,8 @@ object CoreNode {
     private var app: OmaSendApp? = null
 
     private val quicOffers = ConcurrentHashMap.newKeySet<String>()
+    /** Incoming QUIC transfers currently holding [TransferPowerLocks]. */
+    private val quicReceiving = ConcurrentHashMap.newKeySet<String>()
     private val sendListeners = ConcurrentHashMap<String, (String, Long, Long) -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 
@@ -75,6 +77,10 @@ object CoreNode {
     @Volatile
     var lastStartError: String? = null
         private set
+
+    /** Whether the running node uses relays (internet path); only with an OmaID account. */
+    @Volatile
+    private var runningWan = false
 
     /**
      * Starts the node on [scope] (an IO scope): the core retries a busy port for several
@@ -98,17 +104,21 @@ object CoreNode {
         _state.value = State.STARTING
         try {
             val dir = File(app.getExternalFilesDir(null) ?: app.filesDir, "incoming").apply { mkdirs() }
+            // Relays (internet path between account devices) only with an OmaID account; the
+            // relay URL is shared only inside the end-to-end encrypted account record.
+            val wan = app.account.hasAccount()
             node = OmaNode.start(
                 DeviceKey.seed(app),
                 NetworkUtils.getDeviceName(app),
                 dir.absolutePath,
                 QUIC_PORT.toUShort(),
-                false,
+                wan,
                 Callbacks(app)
             )
+            runningWan = wan
             lastStartError = null
             _state.value = State.RUNNING
-            Log.i(TAG, "core node started on UDP ${node?.boundPort()}")
+            Log.i(TAG, "core node started on UDP ${node?.boundPort()} (wan=$wan)")
         } catch (t: Throwable) {
             // Unpaired peers keep working over HTTP; paired devices report a clear error.
             // This includes DeviceKey.DeviceKeyUnavailableException: the stored key is kept.
@@ -116,6 +126,25 @@ object CoreNode {
             _state.value = State.FAILED
             Log.w(TAG, "core node unavailable: ${t.message}")
         }
+    }
+
+    /**
+     * Restarts a running node when an OmaID account was created, joined or left, so relays
+     * are on exactly when an account exists. Blocking (call on an IO thread); a no-op when the
+     * node is not running or already in the right mode. Running transfers are interrupted.
+     */
+    fun ensureWanMode(app: OmaSendApp) {
+        val want = app.account.hasAccount()
+        synchronized(this) {
+            val old = node ?: return
+            if (_state.value != State.RUNNING || runningWan == want) return
+            Log.i(TAG, "restarting core node (wan=$want)")
+            node = null
+            _state.value = State.IDLE
+            runCatching { old.shutdown() }
+            runCatching { old.destroy() }
+        }
+        start(app)
     }
 
     /** The running node, waiting up to [timeoutMs] while a start is in progress. */
@@ -166,7 +195,10 @@ object CoreNode {
         }
         if (!extraIp.isNullOrBlank()) ips += extraIp
         if (key.ip.isNotBlank()) ips += key.ip
-        return ips.map { "$it:$port" }
+        val out = LinkedHashSet(ips.map { "$it:$port" })
+        // OmaID account devices: their published LAN addresses and relay URL ("https://…").
+        app?.account?.dialHints(key.pk)?.let { out += it }
+        return out.toList()
     }
 
     private fun friendlyError(name: String, raw: String): String {
@@ -184,6 +216,11 @@ object CoreNode {
     // ------------------------------------------------------------------ clipboard
 
     /** Encrypted clipboard push to a paired key. Never downgraded to HTTP. */
+    /** Marks a copy made on this phone, so older text still arriving from another device loses. */
+    fun noteLocalClipboard() {
+        node?.noteLocalClipboard()
+    }
+
     fun sendClipboard(key: DeviceKey.TrustedKey, text: String, extraIp: String? = null): Result<Unit> {
         // Blocking network call: always invoked off the main thread, so waiting for a start that
         // is still in progress (A5: the node now starts asynchronously) is fine here.
@@ -287,6 +324,7 @@ object CoreNode {
             var speedFile = ""
             var speed: TransferSpeedCalculator? = null
             sendListeners[id] = { file, done, total ->
+                TransferPowerLocks.keepAlive()
                 val calc = speed?.takeIf { speedFile == file }
                     ?: TransferSpeedCalculator(total).also { speed = it; speedFile = file }
                 val m = calc.update(done)
@@ -297,10 +335,13 @@ object CoreNode {
                     main.post { onState(TransferProgressState.Transferring(true, key.name, file, done, total, pct, m.speedMBps, m.etaSeconds)) }
                 }
             }
+            // Wi-Fi + wake locks only while the files are actually moving.
+            TransferPowerLocks.begin(context)
             try {
                 n.sendFiles(key.pk, addrs, paths, names, id)
             } finally {
                 sendListeners.remove(id)
+                TransferPowerLocks.end()
             }
             withContext(Dispatchers.Main) {
                 app.soundEngine.playSendSound()
@@ -363,7 +404,14 @@ object CoreNode {
         }
 
         override fun progress(transferId: String, direction: Direction, fileName: String, done: ULong, total: ULong) {
-            if (direction == Direction.SEND) sendListeners[transferId]?.invoke(fileName, done.toLong(), total.toLong())
+            if (direction == Direction.SEND) {
+                sendListeners[transferId]?.invoke(fileName, done.toLong(), total.toLong())
+            } else if (quicReceiving.add(transferId)) {
+                // First progress of an accepted incoming transfer: hold the locks until it finishes.
+                TransferPowerLocks.begin(app)
+            } else {
+                TransferPowerLocks.keepAlive()
+            }
         }
 
         override fun fileReceived(transferId: String, peerPk: String, path: String) {
@@ -383,6 +431,7 @@ object CoreNode {
                             app.hapticController.onFileReceivedImpact()
                         }
                         app.server.onFileReceived?.invoke(finalNameOrError, size)
+                        app.notifyFileReceived(finalNameOrError)
                     }
                 } else {
                     Log.w(TAG, "could not save ${f.name} to Downloads ($finalNameOrError); kept at ${f.absolutePath}")
@@ -400,6 +449,7 @@ object CoreNode {
 
         override fun transferFinished(transferId: String, direction: Direction, ok: Boolean, error: String?) {
             quicOffers.remove(transferId)
+            if (quicReceiving.remove(transferId)) TransferPowerLocks.end()
             if (!ok) Log.i(TAG, "transfer $transferId ($direction) failed: $error")
         }
 
@@ -409,9 +459,8 @@ object CoreNode {
             main.post {
                 runCatching {
                     val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    // Shared clipboard is silent: no sound or vibration per copy.
                     cm?.setPrimaryClip(ClipData.newPlainText("OmaSend", text))
-                    app.soundEngine.playReceiveSound()
-                    app.hapticController.onClipboardReceived()
                 }
                 app.server.onClipboardReceived?.invoke(name, text)
             }

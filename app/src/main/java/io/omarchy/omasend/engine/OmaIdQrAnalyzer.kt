@@ -39,30 +39,17 @@ class OmaIdQrAnalyzer(
         try {
             val plane = imageProxy.planes.firstOrNull()
             if (plane != null) {
-                val buffer: ByteBuffer = plane.buffer
-                val data = ByteArray(buffer.remaining())
-                buffer.get(data)
-
                 val width = imageProxy.width
                 val height = imageProxy.height
-
-                // Planar YUV Luminance Source on Y plane (zero copy across chroma)
-                val source = PlanarYUVLuminanceSource(
-                    data,
-                    width,
-                    height,
-                    0,
-                    0,
-                    width,
-                    height,
-                    false
-                )
+                // The Y plane is usually padded (rowStride > width); ZXing needs tightly packed rows.
+                val data = packLuma(plane.buffer, plane.rowStride, plane.pixelStride, width, height)
+                val source = PlanarYUVLuminanceSource(data, width, height, 0, 0, width, height, false)
 
                 val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
                 val result = reader.decodeWithState(binaryBitmap)
 
                 if (result != null && !result.text.isNullOrBlank() && onPairUriDetected != null &&
-                    io.omarchy.omasend.crypto.DeviceKey.isPairUri(result.text)
+                    io.omarchy.omasend.account.AccountLogic.isScannableLink(result.text)
                 ) {
                     isPaused = true
                     onPairUriDetected.invoke(result.text.trim())
@@ -90,5 +77,32 @@ class OmaIdQrAnalyzer(
 
     fun resume() {
         isPaused = false
+    }
+
+    companion object {
+        /**
+         * Copies a camera luminance plane into a `width * height` array, dropping row padding
+         * and honouring the pixel stride. Without this, devices whose rowStride differs from the
+         * image width hand ZXing a sheared image and dense codes (pairing QR) never decode.
+         */
+        fun packLuma(buffer: ByteBuffer, rowStride: Int, pixelStride: Int, width: Int, height: Int): ByteArray {
+            val src = buffer.duplicate().apply { rewind() }
+            val out = ByteArray(width * height)
+            if (pixelStride == 1 && rowStride == width && src.remaining() >= out.size) {
+                src.get(out)
+                return out
+            }
+            val row = ByteArray(rowStride)
+            for (y in 0 until height) {
+                src.position(y * rowStride)
+                val len = minOf(rowStride, src.remaining())
+                src.get(row, 0, len)
+                for (x in 0 until width) {
+                    val i = x * pixelStride
+                    if (i < len) out[y * width + x] = row[i]
+                }
+            }
+            return out
+        }
     }
 }

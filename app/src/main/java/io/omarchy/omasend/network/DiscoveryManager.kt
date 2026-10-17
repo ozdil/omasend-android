@@ -2,7 +2,6 @@ package io.omarchy.omasend.network
 
 import android.content.Context
 import android.net.wifi.WifiManager
-import android.os.Build
 import io.omarchy.omasend.crypto.OmaIdentity
 import io.omarchy.omasend.model.DiscoveryMode
 import io.omarchy.omasend.model.DiscoveredPeer
@@ -52,34 +51,22 @@ class DiscoveryManager(private val context: Context) {
     private val _discoveryMode = MutableStateFlow(DiscoveryMode.EVERYONE)
     val discoveryMode: StateFlow<DiscoveryMode> = _discoveryMode.asStateFlow()
 
-    private var lastActiveEventTime: Long = System.currentTimeMillis()
-    private val _currentDutyCycleMs = MutableStateFlow(ACTIVE_INTERVAL_MS)
+    private val _currentDutyCycleMs = MutableStateFlow(BEACON_INTERVAL_MS)
     val currentDutyCycleMs: StateFlow<Long> = _currentDutyCycleMs.asStateFlow()
 
-    companion object {
-        const val ACTIVE_INTERVAL_MS = 1000L      // 1s active discovery when peers present or newly started
-        const val SEARCH_INTERVAL_MS = 2000L      // 2s intermediate search when idle
-        const val IDLE_INTERVAL_MS = 6000L        // 6s deep idle duty cycle (energy saving)
-        const val SEARCH_THRESHOLD_MS = 10_000L   // 10s idle threshold -> 2s interval
-        const val IDLE_THRESHOLD_MS = 30_000L     // 30s idle threshold -> 6s interval
-        const val PEER_EXPIRY_TIMEOUT_MS = 18_000L // 3 missed beacons @ 6s duty cycle
-        private const val KEY_PAIRED_OMA_IDS = "paired_oma_ids"
+    /** True while discovery is enabled but suspended because the screen is off. */
+    @Volatile
+    private var pausedForScreenOff = false
 
-        fun calculateAdaptiveInterval(
-            lastActiveEventTime: Long,
-            hasActivePeers: Boolean,
-            currentTimeMs: Long = System.currentTimeMillis()
-        ): Long {
-            if (hasActivePeers) {
-                return ACTIVE_INTERVAL_MS
-            }
-            val idleDuration = currentTimeMs - lastActiveEventTime
-            return when {
-                idleDuration < SEARCH_THRESHOLD_MS -> ACTIVE_INTERVAL_MS
-                idleDuration < IDLE_THRESHOLD_MS -> SEARCH_INTERVAL_MS
-                else -> IDLE_INTERVAL_MS
-            }
-        }
+    companion object {
+        /**
+         * One beacon every 10 s while the screen is on (battery: the old 1 s cadence kept the
+         * Wi-Fi radio busy). Opening the app or a network change still sends an immediate
+         * burst ([forceRefresh]). Discovery stops entirely while the screen is off.
+         */
+        const val BEACON_INTERVAL_MS = 10_000L
+        const val PEER_EXPIRY_TIMEOUT_MS = 35_000L // 3 missed beacons @ 10 s, plus margin
+        private const val KEY_PAIRED_OMA_IDS = "paired_oma_ids"
 
         const val BEACON_MAGIC = "OMASEND_P2P"
         private val BEACON_MAGIC_BYTES = BEACON_MAGIC.toByteArray(Charsets.UTF_8)
@@ -125,20 +112,14 @@ class DiscoveryManager(private val context: Context) {
         }
     }
 
-    fun markActiveEvent(currentTimeMs: Long = System.currentTimeMillis()) {
-        lastActiveEventTime = currentTimeMs
-        _currentDutyCycleMs.value = ACTIVE_INTERVAL_MS
+    fun markActiveEvent() {
+        _currentDutyCycleMs.value = BEACON_INTERVAL_MS
     }
 
-    fun calculateAdaptiveInterval(currentTimeMs: Long = System.currentTimeMillis()): Long {
-        val now = currentTimeMs
-        val hasActivePeers = peerMap.values.any { !it.id.startsWith("manual_") && (now - it.lastSeen <= PEER_EXPIRY_TIMEOUT_MS) }
-        if (hasActivePeers) {
-            lastActiveEventTime = now
-        }
-        val interval = calculateAdaptiveInterval(lastActiveEventTime, hasActivePeers, now)
-        _currentDutyCycleMs.value = interval
-        return interval
+    private fun isScreenInteractive(): Boolean = try {
+        (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isInteractive ?: true
+    } catch (_: Exception) {
+        true
     }
 
     // ------------------- OMAID PAIRING STORE -------------------
@@ -440,12 +421,13 @@ class DiscoveryManager(private val context: Context) {
 
     fun forceRefresh() {
         markActiveEvent()
+        // Screen off: no beacons or probes (network-change callbacks still call this).
+        if (pausedForScreenOff) return
         scope.launch {
             val myIp = NetworkUtils.getLocalIpAddress()
             if (myIp != "127.0.0.1") {
                 try {
                     val socket = DatagramSocket().apply { broadcast = true }
-                    val myOmaId = getMyOmaId()
                     val beacon = P2pBeaconPacket(
                         magic = "OMASEND_P2P",
                         v = 1,
@@ -454,8 +436,9 @@ class DiscoveryManager(private val context: Context) {
                         ip = myIp,
                         port = NetworkUtils.PORT,
                         mode = _discoveryMode.value.wireMode,
-                        oma_id = myOmaId,
-                        fp = myOmaId,
+                        // The legacy OmaID is public and proves nothing: never broadcast it.
+                        oma_id = "",
+                        fp = "",
                         pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
@@ -525,8 +508,10 @@ class DiscoveryManager(private val context: Context) {
         }
     }
 
+    // Held only while discovery is actually running (not while stopped or paused for screen off),
+    // so broadcast beacons are received. The Wi-Fi lock is held only during transfers
+    // (TransferPowerLocks).
     private var multicastLock: WifiManager.MulticastLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
 
     private fun acquireLocks() {
         try {
@@ -540,21 +525,6 @@ class DiscoveryManager(private val context: Context) {
                 if (multicastLock?.isHeld == false) {
                     multicastLock?.acquire()
                 }
-
-                if (wifiLock == null) {
-                    val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-                    } else {
-                        @Suppress("DEPRECATION")
-                        WifiManager.WIFI_MODE_FULL_HIGH_PERF
-                    }
-                    wifiLock = wifi.createWifiLock(lockMode, "OmaSendWifiLock").apply {
-                        setReferenceCounted(false)
-                    }
-                }
-                if (wifiLock?.isHeld == false) {
-                    wifiLock?.acquire()
-                }
             }
         } catch (_: Exception) {}
     }
@@ -563,9 +533,6 @@ class DiscoveryManager(private val context: Context) {
         try {
             if (multicastLock?.isHeld == true) {
                 multicastLock?.release()
-            }
-            if (wifiLock?.isHeld == true) {
-                wifiLock?.release()
             }
         } catch (_: Exception) {}
     }
@@ -576,7 +543,6 @@ class DiscoveryManager(private val context: Context) {
             if (myIp != "127.0.0.1") {
                 try {
                     val socket = DatagramSocket().apply { broadcast = true }
-                    val myOmaId = getMyOmaId()
                     val beacon = P2pBeaconPacket(
                         magic = "OMASEND_P2P",
                         v = 1,
@@ -585,8 +551,9 @@ class DiscoveryManager(private val context: Context) {
                         ip = myIp,
                         port = NetworkUtils.PORT,
                         mode = "OFF",
-                        oma_id = myOmaId,
-                        fp = myOmaId,
+                        // The legacy OmaID is public and proves nothing: never broadcast it.
+                        oma_id = "",
+                        fp = "",
                         pk = myPk()
                     )
                     val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
@@ -613,15 +580,60 @@ class DiscoveryManager(private val context: Context) {
         if (_discoveryMode.value == DiscoveryMode.OFF) {
             _discoveryMode.value = DiscoveryMode.EVERYONE
         }
+        if (!isScreenInteractive()) {
+            // Enabled, but nothing runs until the screen comes on (see onScreenOn).
+            pausedForScreenOff = true
+            updatePeersFlow()
+            return
+        }
+        pausedForScreenOff = false
+        startRadioWork()
+        updatePeersFlow()
+    }
+
+    private fun startRadioWork() {
         acquireLocks()
         startListener()
         startBroadcaster()
         startCleanup()
-        updatePeersFlow()
+    }
+
+    /** Cancels beacons, the listener and cleanup and releases the multicast lock. */
+    private fun stopRadioWork() {
+        broadcastJob?.cancel()
+        listenJob?.cancel()
+        cleanupJob?.cancel()
+        broadcastJob = null
+        listenJob = null
+        cleanupJob = null
+        try { activeListenSocket?.close() } catch (_: Exception) {}
+        try { activeBroadcastSocket?.close() } catch (_: Exception) {}
+        activeListenSocket = null
+        activeBroadcastSocket = null
+        releaseLocks()
+    }
+
+    /** Screen off: stop beaconing and listening entirely; the HTTP/QUIC servers keep running. */
+    @Synchronized
+    fun onScreenOff() {
+        if (!_isScanning.value || pausedForScreenOff) return
+        pausedForScreenOff = true
+        stopRadioWork()
+    }
+
+    /** Screen on: resume discovery if it is enabled, with an immediate beacon burst. */
+    @Synchronized
+    fun onScreenOn() {
+        if (!pausedForScreenOff) return
+        pausedForScreenOff = false
+        if (!_isScanning.value) return
+        startRadioWork()
+        forceRefresh()
     }
 
     fun stop() {
         _isScanning.value = false
+        pausedForScreenOff = false
         _discoveryMode.value = DiscoveryMode.OFF
         broadcastOfflineBeacon()
         broadcastJob?.cancel()
@@ -645,7 +657,8 @@ class DiscoveryManager(private val context: Context) {
     fun addManualPeer(ip: String, port: Int = NetworkUtils.PORT, name: String = "Direct ($ip)", omaId: String = "") {
         val cleanIp = ip.trim()
         val hasValidOmaId = OmaIdentity.isValid(omaId)
-        if (!NetworkUtils.isPrivateOrLocalIp(cleanIp) && !hasValidOmaId) return
+        // Plain HTTP is LAN-only; an OmaID (public) does not make an Internet address safe.
+        if (!NetworkUtils.isPrivateOrLocalIp(cleanIp)) return
         val formattedOma = if (hasValidOmaId) OmaIdentity.format(omaId) else ""
         val myOmaId = getMyOmaId()
         val isSameOwner = hasValidOmaId && myOmaId.isNotBlank() && OmaIdentity.unformat(myOmaId) == OmaIdentity.unformat(formattedOma)
@@ -701,11 +714,6 @@ class DiscoveryManager(private val context: Context) {
                         if (beacon != null) {
                             val myId = NetworkUtils.getDeviceId(context)
                             val myIp = NetworkUtils.getLocalIpAddress()
-                            val myOmaId = getMyOmaId()
-                            val peerOmaId = if (beacon.oma_id.isNotBlank()) beacon.oma_id else beacon.fp
-
-                            val isSameOwner = myOmaId.isNotBlank() && peerOmaId.isNotBlank() &&
-                                OmaIdentity.unformat(peerOmaId) == OmaIdentity.unformat(myOmaId)
                             val isSelfDevice = beacon.id == myId || (beacon.ip == myIp && beacon.id == myId)
 
                             if (!isSelfDevice) {
@@ -719,22 +727,24 @@ class DiscoveryManager(private val context: Context) {
                                 }
 
                                 val senderIp = packetAddr.hostAddress ?: beacon.ip
-                                val isTrustedPeer = isSameOwner || isOmaIdPaired(peerOmaId) || isPeerTrusted(beacon.id)
+                                val isTrustedPeer = isPeerTrusted(beacon.id)
 
-                                // V2-SEC-03 interim fix: beacons are unauthenticated, so they must not
-                                // overwrite the stored IP/name of a paired OmaID (traffic redirection).
-
-                                val formattedPeerOma = if (peerOmaId.isNotBlank()) OmaIdentity.format(peerOmaId) else ""
+                                // V2-SEC-03: beacons are unauthenticated, so they must not overwrite the
+                                // stored IP/name of a paired OmaID (traffic redirection). A beacon's
+                                // claimed OmaID (public, trivially spoofed) is ignored entirely: it
+                                // neither marks a peer as "same owner" nor as trusted. Only the
+                                // advertised device key (pk) is kept, as an address hint for QUIC,
+                                // which verifies the key itself.
                                 val peer = DiscoveredPeer(
                                     id = beacon.id,
                                     name = beacon.name,
                                     ip = senderIp,
                                     port = beacon.port,
                                     transport = "LAN",
-                                    omaId = formattedPeerOma,
-                                    fingerprint = formattedPeerOma,
+                                    omaId = "",
+                                    fingerprint = "",
                                     isTrusted = isTrustedPeer,
-                                    isSameOwner = isSameOwner,
+                                    isSameOwner = false,
                                     lastSeen = System.currentTimeMillis(),
                                     pk = beacon.pk.takeIf { io.omarchy.omasend.crypto.DeviceKey.decodePk(it) != null } ?: ""
                                 )
@@ -769,7 +779,6 @@ class DiscoveryManager(private val context: Context) {
                 while (isActive) {
                     val myIp = NetworkUtils.getLocalIpAddress()
                     if (myIp != "127.0.0.1") {
-                        val myOmaId = getMyOmaId()
                         val beacon = P2pBeaconPacket(
                             magic = "OMASEND_P2P",
                             v = 1,
@@ -778,8 +787,9 @@ class DiscoveryManager(private val context: Context) {
                             ip = myIp,
                             port = NetworkUtils.PORT,
                             mode = _discoveryMode.value.wireMode,
-                            oma_id = myOmaId,
-                            fp = myOmaId,
+                            // The legacy OmaID is public and proves nothing: never broadcast it.
+                            oma_id = "",
+                            fp = "",
                             pk = myPk()
                         )
                         val payload = json.encodeToString(P2pBeaconPacket.serializer(), beacon).toByteArray(Charsets.UTF_8)
@@ -796,8 +806,7 @@ class DiscoveryManager(private val context: Context) {
                             }
                         }
                     }
-                    val interval = calculateAdaptiveInterval()
-                    delay(interval)
+                    delay(BEACON_INTERVAL_MS)
                 }
             } catch (_: Exception) {
             } finally {

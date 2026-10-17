@@ -2,11 +2,7 @@ package io.omarchy.omasend.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,39 +22,37 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,7 +62,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -76,7 +69,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -91,7 +83,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-val Emerald = Color(0xFF10B981)
+/** "Encrypted / online" mark. Monochrome: brighter than the outline, no hue. */
+/** The theme's ink; "encrypted", "online" and "done" are shown by icon and weight, not by hue. */
+val Ink: Color
+    @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.primary
 
 // ------------------------------------------------------------------ model
 
@@ -145,321 +140,207 @@ fun deviceIcon(name: String): ImageVector {
     }
 }
 
-// ------------------------------------------------------------------ small pieces
+fun PairedDeviceUi.statusText(): String =
+    if (online) OmaI18n.t("status_paired_online") else OmaI18n.t("status_paired_offline")
 
-/** Service state + this device's name in one line; tapping the dot toggles the service. */
+fun DiscoveredPeer.statusText(): String =
+    if (isSameOwner) OmaI18n.t("status_same_omaid") else OmaI18n.t("status_nearby")
+
+// ------------------------------------------------------------------ rows
+
 @Composable
-fun StatusLine(active: Boolean, deviceLabel: String, onToggle: () -> Unit, onRename: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Surface(
-            onClick = onToggle,
-            shape = RoundedCornerShape(6.dp),
-            color = if (active) Emerald.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (active) Emerald else Color.Gray))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (active) OmaI18n.t("status_active") else OmaI18n.t("status_off"),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp,
-                    color = if (active) Emerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = deviceLabel,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = JetBrainsMonoFontFamily,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.clickable(onClick = onRename)
-        )
-    }
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp)
+    )
 }
 
 @Composable
-private fun Badge(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.15f)) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            color = color,
-            maxLines = 1,
-            softWrap = false
-        )
-    }
-}
-
-@Composable
-private fun DeviceAvatar(icon: ImageVector, tint: Color) {
-    Surface(shape = CircleShape, color = tint.copy(alpha = 0.16f), modifier = Modifier.size(40.dp)) {
+private fun DeviceAvatar(icon: ImageVector, active: Boolean) {
+    val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    Surface(shape = CircleShape, color = tint.copy(alpha = 0.14f), modifier = Modifier.size(42.dp)) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         }
     }
 }
 
+/** One device: avatar, name and a single status line. Tapping opens its actions. */
 @Composable
-fun SectionFootnote(text: String, icon: ImageVector) {
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.Top) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp).padding(top = 2.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(text = text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-    }
-}
-
-// ------------------------------------------------------------------ cards
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun PairedDeviceCard(
-    device: PairedDeviceUi,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onSend: () -> Unit,
-    onClipboard: () -> Unit,
-    onRemove: () -> Unit
+fun DeviceRow(
+    name: String,
+    status: String,
+    active: Boolean,
+    encrypted: Boolean,
+    own: Boolean = false,
+    onClick: () -> Unit
 ) {
-    val accent = if (device.key.own_device) Emerald else MaterialTheme.colorScheme.primary
-    var menu by remember { mutableStateOf(false) }
-    ElevatedCard(
+    Surface(
+        onClick = onClick,
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainer
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .combinedClickable(onClick = onSelect, onLongClick = { menu = true })
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            DeviceAvatar(deviceIcon(device.key.name), if (device.online) accent else MaterialTheme.colorScheme.outline)
-            Spacer(modifier = Modifier.width(12.dp))
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            DeviceAvatar(deviceIcon(name), active)
+            Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = device.key.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        text = name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Badge(if (device.key.own_device) OmaI18n.t("badge_own") else OmaI18n.t("badge_paired"), accent)
+                    if (own) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(OmaI18n.t("badge_own"), style = MaterialTheme.typography.labelSmall, color = Ink)
+                    }
                 }
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = Emerald, modifier = Modifier.size(11.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Box(
-                        modifier = Modifier.size(6.dp).clip(CircleShape)
-                            .background(if (device.online) Emerald else MaterialTheme.colorScheme.outline)
+                    Icon(
+                        if (encrypted) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = null,
+                        tint = if (encrypted && active) Ink else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = if (device.online) "${OmaI18n.t("online")} · ${device.ip}" else OmaI18n.t("offline"),
+                        text = status,
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = JetBrainsMonoFontFamily,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-            IconButton(onClick = onClipboard, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ContentPaste, contentDescription = OmaI18n.t("send_clipboard"), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            }
-            FilledTonalIconButton(onClick = onSend, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = OmaI18n.t("send"), modifier = Modifier.size(18.dp))
-            }
-            Box {
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.MoreVert, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("${OmaI18n.t("device_id")}: ${device.key.device_id}", fontFamily = JetBrainsMonoFontFamily, fontSize = 12.sp) },
-                        onClick = { menu = false },
-                        enabled = false
-                    )
-                    DropdownMenuItem(
-                        text = { Text(OmaI18n.t("unpair"), color = MaterialTheme.colorScheme.error) },
-                        onClick = { menu = false; onRemove() }
-                    )
-                }
-            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 @Composable
-fun NearbyPeerCard(peer: DiscoveredPeer, selected: Boolean, onSelect: () -> Unit, onSend: () -> Unit) {
-    val online = peer.lastSeen > 0L && peer.ip.isNotBlank()
-    ElevatedCard(
-        onClick = onSelect,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainer
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            DeviceAvatar(deviceIcon(peer.name), MaterialTheme.colorScheme.secondary)
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = peer.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.LockOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(11.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "${peer.ip} · ${OmaI18n.t("needs_approval")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            FilledTonalIconButton(onClick = onSend, enabled = online, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = OmaI18n.t("send"), modifier = Modifier.size(18.dp))
-            }
-        }
-    }
-}
+fun PairedDeviceRow(device: PairedDeviceUi, onClick: () -> Unit) = DeviceRow(
+    name = device.key.name,
+    status = device.statusText(),
+    active = device.online,
+    encrypted = true,
+    own = device.key.own_device,
+    onClick = onClick
+)
 
 @Composable
-fun PairHintCard(onPair: () -> Unit) {
+fun NearbyDeviceRow(peer: DiscoveredPeer, onClick: () -> Unit) = DeviceRow(
+    name = peer.name,
+    status = peer.statusText(),
+    active = peer.ip.isNotBlank(),
+    encrypted = false,
+    onClick = onClick
+)
+
+/** Shown instead of the "My devices" list until something is paired: one clear next step. */
+@Composable
+fun AddFirstDeviceCard(onAdd: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, Emerald.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Devices, contentDescription = null, tint = Emerald, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(OmaI18n.t("pair_hint_title"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-            }
+        Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+            Text(OmaI18n.t("add_device_empty_title"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(OmaI18n.t("pair_hint_body"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = onPair, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Emerald, contentColor = Color.Black)) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(OmaI18n.t("pair_device"), fontWeight = FontWeight.Bold)
+            Text(OmaI18n.t("add_device_empty_body"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(onClick = onAdd, shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(OmaI18n.t("add_device"))
             }
         }
     }
 }
 
+// ------------------------------------------------------------------ sheets
+
 @Composable
-fun NearbyEmptyCard(scanning: Boolean, onStartScan: () -> Unit, onAddIp: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.WifiTethering, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
+private fun SheetAction(icon: ImageVector, label: String, color: Color = MaterialTheme.colorScheme.onSurface, enabled: Boolean = true, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = if (enabled) color else MaterialTheme.colorScheme.outline, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.width(18.dp))
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = if (enabled) color else MaterialTheme.colorScheme.outline)
+        }
+    }
+}
+
+/**
+ * Everything you can do with one device. [deviceId] and [onUnpair] are set for paired
+ * devices; [onPair] for nearby ones, which can be upgraded to an encrypted pairing.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DeviceSheet(
+    name: String,
+    status: String,
+    encrypted: Boolean,
+    canSend: Boolean,
+    deviceId: String?,
+    onDismiss: () -> Unit,
+    onSendFiles: () -> Unit,
+    onSendMedia: () -> Unit,
+    onSendClipboard: () -> Unit,
+    onUnpair: (() -> Unit)? = null,
+    onPair: (() -> Unit)? = null
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            Row(modifier = Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                DeviceAvatar(deviceIcon(name), canSend)
+                Spacer(modifier = Modifier.width(14.dp))
+                Column {
+                    Text(name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             Text(
-                text = if (scanning) OmaI18n.t("nearby_empty") else OmaI18n.t("scan_paused"),
+                text = if (encrypted) OmaI18n.t("sheet_paired_note") else OmaI18n.t("sheet_nearby_note"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
             )
-            if (scanning) {
-                TextButton(onClick = onAddIp) {
-                    Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(OmaI18n.t("add_ip"))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SheetAction(Icons.Default.Description, OmaI18n.t("send_files"), enabled = canSend, onClick = onSendFiles)
+            SheetAction(Icons.Default.Image, OmaI18n.t("send_media"), enabled = canSend, onClick = onSendMedia)
+            SheetAction(Icons.Default.ContentPaste, OmaI18n.t("send_clipboard"), enabled = canSend, onClick = onSendClipboard)
+            if (onPair != null) {
+                SheetAction(Icons.Default.QrCodeScanner, OmaI18n.t("pair_for_encryption"), color = MaterialTheme.colorScheme.primary, onClick = onPair)
+            }
+            if (deviceId != null || onUnpair != null) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+            }
+            if (deviceId != null) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 10.dp)) {
+                    Text(OmaI18n.t("device_id"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Text(deviceId, style = MaterialTheme.typography.bodyMedium, fontFamily = JetBrainsMonoFontFamily)
                 }
-            } else {
-                TextButton(onClick = onStartScan) { Text(OmaI18n.t("start_scan")) }
+            }
+            if (onUnpair != null) {
+                SheetAction(Icons.Default.LinkOff, OmaI18n.t("unpair"), color = MaterialTheme.colorScheme.error, onClick = onUnpair)
             }
         }
     }
 }
-
-// ------------------------------------------------------------------ dock
-
-@Composable
-fun SendDock(targetName: String?, onSendFiles: () -> Unit, onSendMedia: () -> Unit, onWebQr: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp).navigationBarsPadding(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = onSendFiles,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.weight(1f).height(48.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(17.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (targetName != null) "${OmaI18n.t("send")} → ${targetName.take(12)}" else OmaI18n.t("dock_send_file"),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Surface(
-                onClick = onSendMedia,
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                modifier = Modifier.size(48.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Image, contentDescription = OmaI18n.t("gallery"), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                }
-            }
-            Surface(
-                onClick = onWebQr,
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                modifier = Modifier.size(48.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.QrCode, contentDescription = OmaI18n.t("web_portal"), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-    }
-}
-
-// ------------------------------------------------------------------ dialogs
 
 fun qrBitmap(content: String, size: Int = 640): Bitmap? = try {
     val hints = mapOf(EncodeHintType.MARGIN to 2, EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
@@ -473,11 +354,22 @@ fun qrBitmap(content: String, size: Int = 640): Bitmap? = try {
 }
 
 /**
- * Pair a device: scan the other device's QR (desktop panel or another phone), or show this
- * phone's one-time pairing QR. Closes itself when the other side completes the pairing.
+ * Add a device: scan the other device's QR (desktop panel or another phone), show this
+ * phone's one-time pairing QR, or connect by IP. Closes itself when the other side
+ * completes a pairing started from this phone's QR.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PairDeviceDialog(app: OmaSendApp, onDismiss: () -> Unit, onScan: () -> Unit, onPaired: (String) -> Unit) {
+fun AddDeviceSheet(
+    app: OmaSendApp,
+    onDismiss: () -> Unit,
+    onScan: () -> Unit,
+    onConnectByIp: () -> Unit,
+    onLinkWithOmaId: () -> Unit,
+    onOpenAccount: () -> Unit,
+    onPaired: (String) -> Unit
+) {
+    val account by app.account.state.collectAsState()
     var showQr by remember { mutableStateOf(false) }
     var ownDevice by remember { mutableStateOf(true) }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
@@ -489,15 +381,16 @@ fun PairDeviceDialog(app: OmaSendApp, onDismiss: () -> Unit, onScan: () -> Unit,
     LaunchedEffect(showQr, ownDevice, refreshTick) {
         if (!showQr) return@LaunchedEffect
         qr = null
-        qr = withContext(Dispatchers.Default) {
-            val id = DeviceKey.identity(app)
+        // IO: the device key needs the Keystore and the QUIC port may still be binding.
+        qr = withContext(Dispatchers.IO) {
+            val id = DeviceKey.identityOrNull(app) ?: return@withContext null
             val uri = DeviceKey.createPairOffer(
                 id,
                 NetworkUtils.getDeviceName(app),
                 NetworkUtils.getLocalIpAddress(),
                 NetworkUtils.PORT,
                 ownDevice,
-                CoreNode.node?.boundPort()?.toInt() ?: CoreNode.QUIC_PORT
+                CoreNode.advertisedQuicPort()
             )
             qrBitmap(uri)
         }
@@ -511,71 +404,93 @@ fun PairDeviceDialog(app: OmaSendApp, onDismiss: () -> Unit, onScan: () -> Unit,
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(OmaI18n.t("pair_device"), fontWeight = FontWeight.Bold, fontFamily = JetBrainsMonoFontFamily) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (!showQr) {
-                    Text(OmaI18n.t("pair_intro"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Button(onClick = onScan, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(OmaI18n.t("scan_qr"), fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = { showQr = true }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.QrCode2, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(OmaI18n.t("show_my_qr"))
-                    }
-                } else {
-                    Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.size(232.dp)) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
-                            val bmp = qr
-                            if (bmp != null) {
-                                Image(bitmap = bmp.asImageBitmap(), contentDescription = OmaI18n.t("show_my_qr"), modifier = Modifier.fillMaxSize())
-                            } else {
-                                CircularProgressIndicator()
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "${NetworkUtils.getDeviceName(app)} · ${DeviceKey.identity(app).deviceId}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(OmaI18n.t("qr_validity"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(OmaI18n.t("own_device_toggle"), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                if (ownDevice) OmaI18n.t("own_device_on") else OmaI18n.t("own_device_off"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(checked = ownDevice, onCheckedChange = { ownDevice = it })
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp).padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(OmaI18n.t("add_device"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(8.dp))
+            if (!showQr) {
+                Text(OmaI18n.t("pair_intro"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(onClick = onScan, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(OmaI18n.t("scan_qr"), style = MaterialTheme.typography.titleSmall)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(onClick = { showQr = true }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Icon(Icons.Default.QrCode2, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(OmaI18n.t("show_my_qr"), style = MaterialTheme.typography.titleSmall)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                // OmaID account: your devices everywhere, approved once (also over the internet).
+                TextButton(onClick = onOpenAccount) {
+                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(OmaI18n.t("acct_title"))
+                }
+                // Legacy number linking (same network only) is off once an account exists.
+                if (account.loaded && account.view == null) {
+                    TextButton(onClick = onLinkWithOmaId) {
+                        Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(OmaI18n.t("omaid_link"))
                     }
                 }
+                TextButton(onClick = onConnectByIp) {
+                    Icon(Icons.Default.AddLink, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(OmaI18n.t("connect_by_ip"))
+                }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.size(248.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(10.dp)) {
+                        val bmp = qr
+                        if (bmp != null) {
+                            Image(bitmap = bmp.asImageBitmap(), contentDescription = OmaI18n.t("show_my_qr"), modifier = Modifier.fillMaxSize())
+                        } else {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(NetworkUtils.getDeviceName(app), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    OmaI18n.t("qr_validity"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(OmaI18n.t("own_device_toggle"), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (ownDevice) OmaI18n.t("own_device_on") else OmaI18n.t("own_device_off"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(checked = ownDevice, onCheckedChange = { ownDevice = it })
+                }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(OmaI18n.t("close")) } }
-    )
+        }
+    }
 }
 
 @Composable
-fun RemovePairingDialog(name: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun RemovePairingDialog(name: String, own: Boolean = false, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(OmaI18n.t("unpair"), fontWeight = FontWeight.Bold) },
-        text = { Text(OmaI18n.f("unpair_confirm", name), style = MaterialTheme.typography.bodyMedium) },
+        title = { Text(OmaI18n.t("unpair")) },
+        text = {
+            Text(OmaI18n.f(if (own) "unpair_own_confirm" else "unpair_confirm", name), style = MaterialTheme.typography.bodyMedium)
+        },
         confirmButton = {
             Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                 Text(OmaI18n.t("unpair"))
@@ -589,38 +504,25 @@ fun RemovePairingDialog(name: String, onConfirm: () -> Unit, onDismiss: () -> Un
 fun ChooseTargetDialog(lists: DeviceLists, onDismiss: () -> Unit, onSelect: (DiscoveredPeer) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(OmaI18n.t("choose_target"), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) },
+        title = { Text(OmaI18n.t("choose_target")) },
         text = {
             if (lists.paired.isEmpty() && lists.nearby.isEmpty()) {
                 Text(OmaI18n.t("no_targets"), style = MaterialTheme.typography.bodyMedium)
             } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 2.dp)
+                ) {
                     items(lists.paired, key = { "t_${it.key.pk}" }) { d ->
-                        TargetRow(d.key.name, if (d.online) "${OmaI18n.t("encrypted")} · ${d.ip}" else "${OmaI18n.t("encrypted")} · ${OmaI18n.t("offline")}", true) {
-                            onSelect(d.asPeer())
-                        }
+                        PairedDeviceRow(d) { onSelect(d.asPeer()) }
                     }
                     items(lists.nearby, key = { "n_${it.id}" }) { p ->
-                        TargetRow(p.name, "${p.ip} · ${OmaI18n.t("needs_approval")}", false) { onSelect(p) }
+                        NearbyDeviceRow(p) { onSelect(p) }
                     }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(OmaI18n.t("cancel")) } }
     )
-}
-
-@Composable
-private fun TargetRow(name: String, subtitle: String, encrypted: Boolean, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(deviceIcon(name), contentDescription = null, tint = if (encrypted) Emerald else MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp))
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Icon(if (encrypted) Icons.Default.Lock else Icons.Default.LockOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-        }
-    }
 }

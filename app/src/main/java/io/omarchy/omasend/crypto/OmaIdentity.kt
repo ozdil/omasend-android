@@ -10,6 +10,14 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.Serializable
 
+/**
+ * The legacy OmaID. It is PUBLIC: older versions broadcast it in LAN beacons, ping responses and
+ * request headers, and it has only ~50 bits of entropy. Nothing may use it as a secret: the
+ * rendezvous topic, the HKDF "E2EE" key and the p2p session key derived from it below protect
+ * nothing and are kept only so old data and test vectors still parse. Authentication comes from
+ * the Ed25519 device key (DeviceKey) and the QUIC core; the secret account number lives in
+ * OmaLink and never goes on the wire.
+ */
 @Serializable
 data class OmaIdentity(
     val formattedId: String,
@@ -18,9 +26,11 @@ data class OmaIdentity(
     val rawId: String
         get() = unformat(formattedId)
 
+    @Suppress("DEPRECATION")
     val blindTopic: String
         get() = deriveBlindTopic(formattedId)
 
+    @Suppress("DEPRECATION")
     companion object {
         private const val PREFS_NAME = "omasend_identity_store"
         private const val KEY_OMA_ID = "active_oma_id"
@@ -126,6 +136,7 @@ data class OmaIdentity(
          * Computes the 64-character hex topic ID for blinded rendezvous using HMAC-SHA256.
          * 100% byte-compatible with Rust rendezvous.rs compute_rendezvous_topic.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun deriveBlindTopic(omaId: String, customTopicKey: ByteArray = RENDEZVOUS_TOPIC_KEY): String {
             val raw = unformat(omaId)
             val ikm = raw.toByteArray(Charsets.UTF_8)
@@ -137,6 +148,7 @@ data class OmaIdentity(
          * Derives a 256-bit symmetric key from OmaID using RFC 5869 HKDF-SHA256.
          * 100% byte-compatible with Rust rendezvous.rs derive_rendezvous_key.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun deriveRendezvousKey(omaId: String): ByteArray {
             val raw = unformat(omaId)
             val ikm = raw.toByteArray(Charsets.UTF_8)
@@ -146,6 +158,7 @@ data class OmaIdentity(
         /**
          * Derives a 256-bit AES key from OmaID.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun deriveAesKey(omaId: String): SecretKeySpec {
             return SecretKeySpec(deriveRendezvousKey(omaId), "AES")
         }
@@ -154,6 +167,7 @@ data class OmaIdentity(
          * Encrypts binary payload using AES-256-GCM.
          * Output layout: [12-byte IV] + [Ciphertext with 128-bit Auth Tag]
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun encryptPayload(plaintext: ByteArray, omaId: String, aad: ByteArray? = null): ByteArray {
             val key = deriveAesKey(omaId)
             val iv = ByteArray(12)
@@ -173,6 +187,7 @@ data class OmaIdentity(
         /**
          * Decrypts binary payload using AES-256-GCM.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun decryptPayload(ciphertextWithIv: ByteArray, omaId: String, aad: ByteArray? = null): ByteArray {
             if (ciphertextWithIv.size < 28) {
                 throw IllegalArgumentException("Ciphertext payload too short for AES-GCM")
@@ -191,6 +206,7 @@ data class OmaIdentity(
         /**
          * String helper: Encrypts plaintext string to Base64 AES-256-GCM.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun encryptString(plaintext: String, omaId: String): String {
             val encrypted = encryptPayload(plaintext.toByteArray(Charsets.UTF_8), omaId)
             return try {
@@ -204,6 +220,7 @@ data class OmaIdentity(
          * Derives a pairwise session key between two OmaIDs using symmetric HKDF
          * 100% byte-compatible with Linux rendezvous.rs derive_p2p_session_key
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun deriveP2pSessionKey(localOmaId: String, remoteOmaId: String): SecretKeySpec {
             val normLocal = unformat(localOmaId)
             val normRemote = unformat(remoteOmaId)
@@ -220,6 +237,7 @@ data class OmaIdentity(
         /**
          * Encrypts plaintext bytes using pairwise P2P AES-256-GCM
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun encryptP2pPayload(plaintext: ByteArray, localOmaId: String, remoteOmaId: String): ByteArray {
             val key = deriveP2pSessionKey(localOmaId, remoteOmaId)
             val iv = ByteArray(12)
@@ -236,6 +254,7 @@ data class OmaIdentity(
         /**
          * Decrypts ciphertext bytes using pairwise P2P AES-256-GCM
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun decryptP2pPayload(ciphertextWithIv: ByteArray, localOmaId: String, remoteOmaId: String): ByteArray {
             if (ciphertextWithIv.size < 28) {
                 throw IllegalArgumentException("P2P ciphertext payload too short")
@@ -251,6 +270,7 @@ data class OmaIdentity(
         /**
          * String helper: Decrypts Base64 AES-256-GCM ciphertext to plaintext string.
          */
+        @Deprecated("Insecure: keyed only by the public OmaID. Must not protect confidentiality or authenticity.")
         fun decryptString(encryptedBase64: String, omaId: String): String {
             val bytes = try {
                 android.util.Base64.decode(encryptedBase64.trim(), android.util.Base64.DEFAULT)

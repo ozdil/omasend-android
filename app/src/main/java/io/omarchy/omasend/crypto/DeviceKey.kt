@@ -109,10 +109,11 @@ object DeviceKey {
     class DeviceKeyUnavailableException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 
     private const val ENC_FILE = "device_ed25519.key.enc"
+    /** Legacy plaintext seed (older versions, Keystore-less fallback). Read only to migrate it. */
     private const val PLAIN_FILE = "device_ed25519.key"
     private const val UNWRAP_RETRY_DELAY_MS = 300L
 
-    /** Non-throwing variant for callers that can fall back to the legacy (unsigned) path. */
+    /** Non-throwing variant: null while the key is unavailable (callers must fail, not go unsigned). */
     fun identityOrNull(context: Context): Identity? = try {
         identity(context)
     } catch (_: DeviceKeyUnavailableException) {
@@ -127,25 +128,61 @@ object DeviceKey {
      * thrown; the file is left untouched so a transient Keystore failure does not destroy the
      * identity (and with it every QR pairing on both sides). Nothing is cached on failure, so the
      * next call tries again. Blocking (Keystore + disk): call off the main thread when possible.
+     *
+     * The key is never written in plaintext. A plaintext seed left by an older version is read
+     * only to migrate it into Keystore-wrapped storage, after which it (and any plaintext
+     * backups of it) is deleted. If the Keystore is unusable the key is unavailable
+     * ([DeviceKeyUnavailableException]); the plaintext file is then kept so the identity (and its
+     * pairings) can still be migrated once the Keystore works.
      */
     fun identity(context: Context): Identity {
         cachedIdentity?.let { return it }
         synchronized(this) {
             cachedIdentity?.let { return it }
             val file = File(context.filesDir, ENC_FILE)
-            // Fallback for devices whose Keystore is unusable: app-private plain seed file.
             val plain = File(context.filesDir, PLAIN_FILE)
             val seed = when {
-                file.exists() -> loadWrappedSeed(file)
-                plain.exists() -> plain.readBytes().takeIf { it.size == 32 } ?: run {
-                    // A truncated plain seed cannot be recovered; keep it for forensics and start over.
-                    backup(plain, "corrupt")
-                    generateAndStoreSeed(file, plain)
-                }
-                else -> generateAndStoreSeed(file, plain)
+                file.exists() -> loadWrappedSeed(file).also { deletePlaintextSeeds(context) }
+                plain.exists() -> migratePlainSeed(context, file, plain)
+                else -> generateAndStoreSeed(file)
             }
             cachedSeed = seed.copyOf()
             return Identity(seed).also { cachedIdentity = it }
+        }
+    }
+
+    /** Moves a legacy plaintext seed into Keystore-wrapped storage and deletes the plaintext. */
+    private fun migratePlainSeed(context: Context, file: File, plain: File): ByteArray {
+        val s = plain.readBytes()
+        if (s.size != 32) {
+            // A truncated plain seed cannot be recovered; never keep plaintext key material.
+            deletePlaintextSeeds(context)
+            return generateAndStoreSeed(file)
+        }
+        val wrapped = wrap(s)
+        if (wrapped == null || unwrap(wrapped)?.let { ctEq(it, s) } != true) {
+            throw DeviceKeyUnavailableException(
+                "Android Keystore is unavailable; the legacy device key was not migrated and is not used."
+            )
+        }
+        writeAtomically(file, wrapped)
+        deletePlaintextSeeds(context)
+        return s
+    }
+
+    /** Deletes the legacy plaintext seed and plaintext backups of it (never the wrapped key). */
+    private fun deletePlaintextSeeds(context: Context) {
+        try {
+            context.filesDir.listFiles()?.forEach { f ->
+                val n = f.name
+                val isPlain = n == PLAIN_FILE || (n.startsWith("$PLAIN_FILE.") && !n.startsWith(ENC_FILE))
+                if (isPlain && f.isFile) {
+                    // Best effort overwrite before unlinking; flash storage may still keep a copy.
+                    try { f.writeBytes(ByteArray(f.length().toInt().coerceIn(0, 4096))) } catch (_: Exception) {}
+                    f.delete()
+                }
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -158,11 +195,9 @@ object DeviceKey {
     fun resetIdentity(context: Context): Identity {
         synchronized(this) {
             val file = File(context.filesDir, ENC_FILE)
-            val plain = File(context.filesDir, PLAIN_FILE)
             backup(file, "reset")
-            backup(plain, "reset")
             file.delete()
-            plain.delete()
+            deletePlaintextSeeds(context)
             cachedIdentity = null
             cachedSeed = null
             return identity(context)
@@ -199,10 +234,13 @@ object DeviceKey {
         return seed
     }
 
-    private fun generateAndStoreSeed(file: File, plain: File): ByteArray {
+    /** New seed, stored only wrapped by the Keystore. Never falls back to a plaintext file. */
+    private fun generateAndStoreSeed(file: File): ByteArray {
         val s = randomBytes(32)
-        val wrapped = wrap(s)
-        if (wrapped != null) writeAtomically(file, wrapped) else writeAtomically(plain, s)
+        val wrapped = wrap(s) ?: throw DeviceKeyUnavailableException(
+            "Android Keystore is unavailable; refusing to store the device key in plaintext."
+        )
+        writeAtomically(file, wrapped)
         return s
     }
 

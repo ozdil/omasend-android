@@ -7,7 +7,10 @@ import io.omarchy.omasend.model.TransferDecision
 import io.omarchy.omasend.model.TransferFileInfo
 import io.omarchy.omasend.model.TransferRequest
 import io.omarchy.omasend.model.TransferResponse
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Interceptor
@@ -68,19 +71,31 @@ class OmaSendClient(private val context: Context) {
             body?.writeTo(buf)
             DeviceKey.bodyTagJson(buf.readByteArray())
         }
-        // If the device key is temporarily unreadable, send unsigned: the receiver applies the
-        // legacy rules, which is what this HTTP path is for anyway (paired devices use QUIC).
+        // Never send unsigned: if the device key cannot be read, the request fails with a clear
+        // error instead of silently dropping to the unauthenticated legacy rules.
         val id = DeviceKey.identityOrNull(context)
-        if (id == null) {
-            chain.proceed(req)
-        } else {
-            val signed = req.newBuilder()
-            DeviceKey.authHeaders(id, req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
-            chain.proceed(signed.build())
+            ?: throw java.io.IOException("Device key unavailable (Android Keystore); refusing to send an unsigned request")
+        val signed = req.newBuilder()
+        DeviceKey.authHeaders(id, req.method, pathAndQuery, tag).forEach { (k, v) -> signed.header(k, v) }
+        chain.proceed(signed.build())
+    }
+
+    /**
+     * Plain HTTP must never leave the local network. Every request (transfers, clipboard,
+     * pairing, linking, roster sync) is checked here, so no call site can forget it: only
+     * loopback, RFC 1918, link-local and IPv6 ULA/link-local literals are allowed. Hostnames
+     * (other than "localhost") are refused, so DNS cannot point a request at the Internet.
+     */
+    private val lanOnlyInterceptor = Interceptor { chain ->
+        val host = chain.request().url.host
+        if (!NetworkUtils.isPrivateOrLocalIp(host)) {
+            throw java.io.IOException("Refusing plain HTTP to $host: only local network addresses are allowed")
         }
+        chain.proceed(chain.request())
     }
 
     private val client = OkHttpClient.Builder()
+        .addInterceptor(lanOnlyInterceptor)
         .addInterceptor(v2SigningInterceptor)
         .socketFactory(HighPerfSocketFactory())
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -94,28 +109,8 @@ class OmaSendClient(private val context: Context) {
         .writeTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    private fun getLocalOmaId(): String {
-        return try {
-            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-            app?.omaIdentity?.formattedId ?: io.omarchy.omasend.crypto.OmaIdentity.getOrGenerate(context).formattedId
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun isAllowedTarget(targetIp: String, targetOmaId: String? = null, hasActiveToken: Boolean = false): Boolean {
-        if (NetworkUtils.isPrivateOrLocalIp(targetIp)) return true
-        if (hasActiveToken) return true
-        if (!targetOmaId.isNullOrBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(targetOmaId)) return true
-        val localOma = getLocalOmaId()
-        if (localOma.isNotBlank() && io.omarchy.omasend.crypto.OmaIdentity.isValid(localOma)) {
-            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
-            val knownWanPeer = app?.discoveryManager?.peers?.value?.any { it.ip == targetIp } == true ||
-                app?.wanDiscoveryEngine?.status?.value?.rendezvousPeers?.any { it.ip == targetIp } == true
-            if (knownWanPeer) return true
-        }
-        return false
-    }
+    /** Local network (loopback, RFC 1918, link-local, IPv6 ULA) only; see [lanOnlyInterceptor]. */
+    private fun isAllowedTarget(targetIp: String): Boolean = NetworkUtils.isPrivateOrLocalIp(targetIp)
 
     /**
      * Protocol v2 initiator: pair with the device whose QR code (omasend://pair?...) was scanned.
@@ -157,13 +152,132 @@ class OmaSendClient(private val context: Context) {
         }
     }
 
+    private fun postJson(url: String, body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject {
+        val request = Request.Builder().url(url).post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        return client.newCall(request).execute().use { response ->
+            val text = response.body.string().ifEmpty { error("Empty response") }
+            val obj = json.parseToJsonElement(text) as? kotlinx.serialization.json.JsonObject ?: error("Malformed response")
+            if (!response.isSuccessful) {
+                error((obj["error"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Rejected (${response.code})")
+            }
+            obj
+        }
+    }
+
+    private fun linkOne(host: String, port: Int, accountId: String): Result<DeviceKey.TrustedKey> = runCatching {
+        val base = "http://$host:$port/api/v2/link"
+        val ini = io.omarchy.omasend.crypto.OmaLink.Initiator(accountId)
+        val pA = DeviceKey.b64(ini.pA)
+        val start = postJson("$base/start", kotlinx.serialization.json.buildJsonObject {
+            put("v", kotlinx.serialization.json.JsonPrimitive(1))
+            put("pA", kotlinx.serialization.json.JsonPrimitive(pA))
+        })
+        fun field(k: String) = (start[k] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: error("Missing $k")
+        val pB = field("pB")
+        // Fails here for every device on another account; nothing more is sent.
+        val keys = ini.finish(DeviceKey.unb64(pB) ?: error("Invalid pB"), DeviceKey.unb64(field("cB")) ?: error("Invalid cB")).getOrThrow()
+        val id = DeviceKey.identity(context)
+        val myQuic = CoreNode.advertisedQuicPort()
+        val reply = postJson("$base/finish", kotlinx.serialization.json.buildJsonObject {
+            put("sid", kotlinx.serialization.json.JsonPrimitive(field("sid")))
+            put("cA", kotlinx.serialization.json.JsonPrimitive(DeviceKey.b64(keys.cA)))
+            put("box", kotlinx.serialization.json.JsonPrimitive(
+                io.omarchy.omasend.crypto.OmaLink.initiatorBox(id, keys, pA, pB, NetworkUtils.getDeviceName(context), myQuic)
+            ))
+        })
+        val sealed = (reply["box"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: error("Missing box")
+        val peer = io.omarchy.omasend.crypto.OmaLink.openResponderBox(keys, pA, pB, id.publicB64, sealed).getOrThrow()
+        require(!io.omarchy.omasend.crypto.OmaLink.isRevoked(context, peer.pk)) { "That device was removed from the account" }
+        val now = DeviceKey.nowSecs()
+        val key = DeviceKey.TrustedKey(
+            pk = peer.pk,
+            device_id = DeviceKey.deviceIdForPk(DeviceKey.decodePk(peer.pk)!!),
+            name = peer.name,
+            ip = host,
+            port = port,
+            quic_port = peer.quicPort,
+            own_device = true,
+            added_at = now,
+            last_seen = now
+        )
+        DeviceKey.TrustStore(context).upsert(key)
+        key
+    }
+
+    private val rosterScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    /**
+     * Sends our own-device list and revocations to every own device we can address (and to
+     * nearby revoked devices, so they leave the account). Best effort, in the background.
+     */
+    fun pushRoster() {
+        rosterScope.launch {
+            val me = DeviceKey.identityOrNull(context) ?: return@launch
+            val app = context.applicationContext as? io.omarchy.omasend.OmaSendApp
+            val store = DeviceKey.TrustStore(context)
+            val revoked = io.omarchy.omasend.crypto.OmaLink.revoked(context)
+            val own = store.load().filter { it.own_device }
+            val body = io.omarchy.omasend.crypto.OmaLink.rosterBody(
+                me,
+                NetworkUtils.getDeviceName(context),
+                NetworkUtils.PORT,
+                CoreNode.advertisedQuicPort(),
+                own,
+                revoked
+            )
+            val nearby = app?.discoveryManager?.peers?.value.orEmpty()
+            val targets = own.mapNotNull { k ->
+                val seen = nearby.firstOrNull { it.pk == k.pk }
+                val ip = seen?.ip ?: k.ip
+                val port = seen?.port ?: k.port.takeIf { it != 0 } ?: NetworkUtils.PORT
+                if (ip.isBlank()) null else ip to port
+            } + nearby.filter { it.pk in revoked }.map { it.ip to it.port }
+            targets.distinct().map { (ip, port) ->
+                async {
+                    runCatching {
+                        val request = Request.Builder()
+                            .url("http://$ip:$port/api/v2/account/sync")
+                            .post(body.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                        client.newCall(request).execute().close()
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
+    /**
+     * "Link with OmaID": tries every nearby, not yet trusted v2 device in parallel. Only devices
+     * holding [accountId] complete the exchange. On any success the number becomes this
+     * device's account OmaID too. Returns the linked devices (empty if none matched).
+     */
+    suspend fun linkWithAccountId(accountId: String, peers: List<io.omarchy.omasend.model.DiscoveredPeer>): Result<List<DeviceKey.TrustedKey>> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                require(io.omarchy.omasend.crypto.OmaIdentity.isValid(accountId)) { "Invalid OmaID" }
+                val myPk = DeviceKey.identity(context).publicB64
+                val known = DeviceKey.TrustStore(context).load().map { it.pk }.toSet()
+                val revoked = io.omarchy.omasend.crypto.OmaLink.revoked(context).toSet()
+                val targets = peers.filter {
+                    it.pk.isNotBlank() && it.pk != myPk && it.pk !in known && it.pk !in revoked && NetworkUtils.isPrivateOrLocalIp(it.ip)
+                }.distinctBy { it.pk }
+                val linked = kotlinx.coroutines.coroutineScope {
+                    targets.map { p -> async { linkOne(p.ip, p.port, accountId).getOrNull() } }.awaitAll().filterNotNull()
+                }
+                if (linked.isNotEmpty()) {
+                    io.omarchy.omasend.crypto.OmaLink.setAccountId(context, accountId)
+                    pushRoster()
+                }
+                linked
+            }
+        }
+
     fun sendTransferRequest(
         targetIp: String,
         targetPort: Int,
-        files: List<TransferFileInfo>,
-        targetOmaId: String = ""
+        files: List<TransferFileInfo>
     ): Result<String> {
-        return sendTransferRequestWithStatus(targetIp, targetPort, files, targetOmaId).map { it.first }
+        return sendTransferRequestWithStatus(targetIp, targetPort, files).map { it.first }
     }
 
     /**
@@ -173,14 +287,12 @@ class OmaSendClient(private val context: Context) {
     fun sendTransferRequestWithStatus(
         targetIp: String,
         targetPort: Int,
-        files: List<TransferFileInfo>,
-        targetOmaId: String = ""
+        files: List<TransferFileInfo>
     ): Result<Pair<String, String>> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope and not an authenticated OmaID session"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
-            val myOmaId = getLocalOmaId()
             val totalBytes = files.sumOf { it.size_bytes }
             val requestPayload = TransferRequest(
                 sender_id = NetworkUtils.getDeviceId(context),
@@ -188,16 +300,12 @@ class OmaSendClient(private val context: Context) {
                 sender_ip = NetworkUtils.getLocalIpAddress(),
                 files = files,
                 total_size_bytes = totalBytes,
-                oma_id = myOmaId
+                oma_id = ""
             )
             val jsonBody = json.encodeToString(TransferRequest.serializer(), requestPayload)
             val requestBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/request")
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-
-            if (myOmaId.isNotBlank()) {
-                requestBuilder.header("X-OmaSend-OmaID", myOmaId)
-            }
 
             client.newCall(requestBuilder.build()).execute().use { response ->
                 val respBody = response.body.string().ifEmpty { return Result.failure(Exception("Empty response")) }
@@ -233,11 +341,10 @@ class OmaSendClient(private val context: Context) {
         token: String,
         timeoutSec: Int = 30
     ): Result<Boolean> {
-        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         cancelRequested = false
-        val myOmaId = getLocalOmaId()
         val deadline = System.currentTimeMillis() + (timeoutSec * 1000L)
         while (System.currentTimeMillis() < deadline) {
             if (cancelRequested) {
@@ -247,9 +354,6 @@ class OmaSendClient(private val context: Context) {
                 val reqBuilder = Request.Builder()
                     .url("http://$targetIp:$targetPort/api/p2p/decision?token=$token")
                     .get()
-                if (myOmaId.isNotBlank()) {
-                    reqBuilder.header("X-OmaSend-OmaID", myOmaId)
-                }
 
                 val decision = client.newCall(reqBuilder.build()).execute().use { response ->
                     val respBody = response.body.string()
@@ -260,6 +364,8 @@ class OmaSendClient(private val context: Context) {
                     "ACCEPTED" -> return Result.success(true)
                     "REJECTED" -> return Result.failure(Exception("Transfer was declined by recipient."))
                     "EXPIRED" -> return Result.failure(Exception("Transfer request expired."))
+                    "NOT_FOUND" -> return Result.failure(Exception("The recipient no longer has this transfer request."))
+                    "" -> if (decision.error != null) return Result.failure(Exception(decision.error))
                     else -> {
                         // Still PENDING, wait and poll again
                     }
@@ -301,14 +407,14 @@ class OmaSendClient(private val context: Context) {
         inputStream: InputStream,
         onProgress: (bytesWritten: Long, totalBytes: Long, percent: Int, speedMBps: Double, etaSeconds: Long) -> Unit
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, hasActiveToken = token.isNotBlank())) {
+        if (!isAllowedTarget(targetIp)) {
             try { inputStream.close() } catch (_: Exception) {}
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         cancelRequested = false
-        val myOmaId = getLocalOmaId()
         val speedCalculator = TransferSpeedCalculator(totalBytes.coerceAtLeast(1L))
-        val wifiLock = NetworkUtils.acquireHighPerfWifiLock(context, "OmaSend:ClientUpload")
+        // Wi-Fi + wake locks only for the duration of the upload (released in finally).
+        TransferPowerLocks.begin(context)
         return try {
             val encodedName = URLEncoder.encode(filename, "UTF-8")
             val countingBody = object : RequestBody() {
@@ -325,6 +431,7 @@ class OmaSendClient(private val context: Context) {
                         }
                         sink.write(buffer, 0, read)
                         uploaded += read
+                        TransferPowerLocks.keepAlive()
                         val metrics = speedCalculator.update(uploaded)
                         onProgress(uploaded, totalBytes, metrics.percent, metrics.speedMBps, metrics.etaSeconds)
                     }
@@ -335,9 +442,6 @@ class OmaSendClient(private val context: Context) {
             val requestBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/upload?token=$token&filename=$encodedName")
                 .post(countingBody)
-            if (myOmaId.isNotBlank()) {
-                requestBuilder.header("X-OmaSend-OmaID", myOmaId)
-            }
 
             val call = uploadClient.newCall(requestBuilder.build())
             activeUploadCall = call
@@ -356,7 +460,7 @@ class OmaSendClient(private val context: Context) {
             }
         } finally {
             activeUploadCall = null
-            NetworkUtils.releaseWifiLock(wifiLock)
+            TransferPowerLocks.end()
             try {
                 inputStream.close()
             } catch (_: Exception) {
@@ -367,29 +471,24 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboard(
         targetIp: String,
         targetPort: Int,
-        text: String,
-        targetOmaId: String = ""
+        text: String
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
-            val myOmaId = getLocalOmaId()
             val payload = ClipboardPayload(
                 sender_id = NetworkUtils.getDeviceId(context),
                 sender_name = NetworkUtils.getDeviceName(context),
                 text = text,
                 pin = null,
                 token = null,
-                oma_id = myOmaId
+                oma_id = ""
             )
             val jsonBody = json.encodeToString(ClipboardPayload.serializer(), payload)
             val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard")
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-            if (myOmaId.isNotBlank()) {
-                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
-            }
 
             client.newCall(reqBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
@@ -406,28 +505,23 @@ class OmaSendClient(private val context: Context) {
     fun sendClipboardPayload(
         targetIp: String,
         targetPort: Int,
-        payload: ClipboardPayload,
-        targetOmaId: String = ""
+        payload: ClipboardPayload
     ): Result<Unit> {
-        if (!isAllowedTarget(targetIp, targetOmaId)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         return try {
-            val myOmaId = getLocalOmaId()
             val fullPayload = payload.copy(
                 sender_id = NetworkUtils.getDeviceId(context),
                 sender_name = NetworkUtils.getDeviceName(context),
                 pin = null,
                 token = null,
-                oma_id = myOmaId
+                oma_id = ""
             )
             val jsonBody = json.encodeToString(ClipboardPayload.serializer(), fullPayload)
             val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard")
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
-            if (myOmaId.isNotBlank()) {
-                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
-            }
 
             client.newCall(reqBuilder.build()).execute().use { response ->
                 if (response.isSuccessful) {
@@ -444,23 +538,18 @@ class OmaSendClient(private val context: Context) {
     fun fetchClipboardImage(
         targetIp: String,
         targetPort: Int,
-        hash: String,
-        targetOmaId: String = ""
+        hash: String
     ): Result<ByteArray> {
-        if (!isAllowedTarget(targetIp, targetOmaId, hasActiveToken = true)) {
-            return Result.failure(SecurityException("Target IP is outside private network scope"))
+        if (!isAllowedTarget(targetIp)) {
+            return Result.failure(SecurityException("Target IP is outside the local network"))
         }
         // The hash comes from the network: only a 64-char hex digest may go into the URL.
         val cleanHash = io.omarchy.omasend.engine.ImageHash.normalize(hash)
             ?: return Result.failure(IllegalArgumentException("Invalid image hash"))
         return try {
-            val myOmaId = getLocalOmaId()
             val reqBuilder = Request.Builder()
                 .url("http://$targetIp:$targetPort/api/p2p/clipboard/image?hash=$cleanHash")
                 .get()
-            if (myOmaId.isNotBlank()) {
-                reqBuilder.header("X-OmaSend-OmaID", myOmaId)
-            }
 
             client.newCall(reqBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
