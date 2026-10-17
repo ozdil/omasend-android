@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">OmaSend</string>
+    <string name="clip_tile_label">Send clipboard</string>
 </resources>

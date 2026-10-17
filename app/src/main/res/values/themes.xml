@@ -2,4 +2,8 @@
 <resources>
 
     <style name="Theme.OmaSend" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.OmaSend.Invisible" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowNoDisplay">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

@@ -65,9 +65,8 @@ class MainActivity : ComponentActivity() {
             ).show()
         }
 
-        app.server.onClipboardReceived = { senderName, _ ->
-            Toast.makeText(this, OmaI18n.f("clipboard_received", senderName), Toast.LENGTH_SHORT).show()
-        }
+        // Received clipboard text is applied silently (CoreNode); no toast per copy.
+        app.server.onClipboardReceived = null
 
         setContent {
             OmaSendTheme {
@@ -112,6 +111,13 @@ class MainActivity : ComponentActivity() {
             val link = intent.dataString
             if (link != null && AccountLogic.isInviteLink(link)) app.account.offerInvite(link)
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Android lets an app read the clipboard only while it has focus: share whatever was
+        // copied elsewhere as soon as OmaSend comes to the front.
+        if (hasFocus) (application as? OmaSendApp)?.let { it.clipboardVault.processLocalClipboard(this, it) }
     }
 
     override fun onResume() {

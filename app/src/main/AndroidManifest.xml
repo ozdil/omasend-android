@@ -86,6 +86,26 @@
             </intent-filter>
         </activity>
 
+        <!-- Shares the clipboard with the user's own devices: needs focus for a moment to read it. -->
+        <activity
+            android:name=".clipboard.ClipboardShareActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OmaSend.Invisible" />
+
+        <service
+            android:name=".clipboard.ClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_omasend"
+            android:label="@string/clip_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".service.OmaSendForegroundService"
             android:exported="false"

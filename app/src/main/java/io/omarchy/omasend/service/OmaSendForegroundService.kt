@@ -1,5 +1,7 @@
 package io.omarchy.omasend.service
 
+import io.omarchy.omasend.clipboard.ClipboardTileService
+import io.omarchy.omasend.ui.OmaI18n
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -95,6 +97,7 @@ class OmaSendForegroundService : Service() {
             .setContentTitle("OmaSend Active")
             .setContentText("$deviceName ready on $ip:53317")
             .setContentIntent(pendingIntent)
+            .addAction(0, OmaI18n.t("clip_tile_label"), ClipboardTileService.shareIntent(this))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()

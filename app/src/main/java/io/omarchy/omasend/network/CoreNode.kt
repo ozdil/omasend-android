@@ -216,6 +216,11 @@ object CoreNode {
     // ------------------------------------------------------------------ clipboard
 
     /** Encrypted clipboard push to a paired key. Never downgraded to HTTP. */
+    /** Marks a copy made on this phone, so older text still arriving from another device loses. */
+    fun noteLocalClipboard() {
+        node?.noteLocalClipboard()
+    }
+
     fun sendClipboard(key: DeviceKey.TrustedKey, text: String, extraIp: String? = null): Result<Unit> {
         // Blocking network call: always invoked off the main thread, so waiting for a start that
         // is still in progress (A5: the node now starts asynchronously) is fine here.
@@ -454,9 +459,8 @@ object CoreNode {
             main.post {
                 runCatching {
                     val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    // Shared clipboard is silent: no sound or vibration per copy.
                     cm?.setPrimaryClip(ClipData.newPlainText("OmaSend", text))
-                    app.soundEngine.playReceiveSound()
-                    app.hapticController.onClipboardReceived()
                 }
                 app.server.onClipboardReceived?.invoke(name, text)
             }
