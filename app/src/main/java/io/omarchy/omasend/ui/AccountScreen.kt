@@ -476,7 +476,7 @@ private fun MemberContent(
     if (confirmLeave) {
         ConfirmDialog(
             title = OmaI18n.t("acct_leave"),
-            body = OmaI18n.t("acct_leave_confirm"),
+            body = OmaI18n.t(if (view.devices.size <= 1) "acct_leave_last_confirm" else "acct_leave_confirm"),
             confirmLabel = OmaI18n.t("acct_leave"),
             onConfirm = {
                 confirmLeave = false

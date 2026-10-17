@@ -39,6 +39,7 @@ import uniffi.omasend_core.accountApprove
 import uniffi.omasend_core.accountCancelReset
 import uniffi.omasend_core.accountChangeNumber
 import uniffi.omasend_core.accountCreate
+import uniffi.omasend_core.accountDelete
 import uniffi.omasend_core.accountInvite
 import uniffi.omasend_core.accountJoin
 import uniffi.omasend_core.accountLeave
@@ -276,9 +277,18 @@ class OmaAccount(private val app: OmaSendApp) {
         syncLocked()
     }
 
-    /** Leaves the account everywhere and forgets it here. */
+    /**
+     * Leaves the account everywhere and forgets it here. Syncs first, since another device may
+     * have replaced the account keys; the last device deletes the account instead, because an
+     * account with no member key cannot be written.
+     */
     suspend fun leave(): Boolean = op(membership = true) {
-        accountLeave(http, requireState(), DeviceKey.seed(app))
+        val r = accountSync(http, requireState(), me(), DeviceKey.seed(app))
+        if (r.status != AccountStatus.REMOVED) {
+            store.saveState(r.state)
+            if (r.devices.size <= 1) accountDelete(http, r.state)
+            else accountLeave(http, r.state, DeviceKey.seed(app))
+        }
         forget(notify = false)
     }
 

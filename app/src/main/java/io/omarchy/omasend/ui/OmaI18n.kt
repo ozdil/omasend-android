@@ -214,6 +214,7 @@ object OmaI18n {
         "acct_change_number" to mapOf("tr" to "Numarayı değiştir", "en" to "Change the number"),
         "acct_change_number_confirm" to mapOf("tr" to "Hesap yeni bir numaraya taşınır. Diğer cihazların otomatik olarak takip eder; eski numara artık çalışmaz.", "en" to "The account moves to a new number. Your other devices follow automatically; the old number stops working."),
         "acct_leave" to mapOf("tr" to "Hesaptan çık", "en" to "Leave the account"),
+        "acct_leave_last_confirm" to mapOf("tr" to "Bu, hesaptaki son cihaz. Çıkarsan hesap sunucudan hemen silinir ve numara bir daha kullanılamaz.", "en" to "This is the account's last device. Leaving deletes the account from the server right away, and the number can't be used again."),
         "acct_leave_confirm" to mapOf("tr" to "Bu cihaz hesaptan çıkar ve hesabın cihazları artık senin cihazın sayılmaz. Hesap diğer cihazlarında devam eder.", "en" to "This device leaves the account and the account's devices are no longer treated as yours. The account continues on your other devices."),
         "acct_reset_pending" to mapOf("tr" to "Biri bu hesabı numarayla sıfırlamaya başladı. Sen değilsen hemen iptal et ve numarayı değiştir.", "en" to "Someone started resetting this account with its number. If it wasn't you, cancel it now and change the number."),
         "acct_cancel_reset" to mapOf("tr" to "İptal et", "en" to "Cancel it"),
