@@ -374,9 +374,10 @@ private fun MemberContent(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = AccountLogic.maskNumber(view.number, revealed),
-                style = MaterialTheme.typography.titleLarge,
+                // 19 monospace characters next to two icons: titleLarge cut off the last group.
+                style = MaterialTheme.typography.titleMedium,
                 fontFamily = JetBrainsMonoFontFamily,
-                maxLines = 1,
+                maxLines = 2,
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = { revealed = !revealed }) {
