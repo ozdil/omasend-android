@@ -36,7 +36,11 @@ class OmaSendForegroundService : Service() {
                     val app = applicationContext as? OmaSendApp ?: return
                     when (intent?.action) {
                         Intent.ACTION_SCREEN_OFF -> app.discoveryManager.onScreenOff()
-                        Intent.ACTION_SCREEN_ON -> app.discoveryManager.onScreenOn()
+                        Intent.ACTION_SCREEN_ON -> {
+                            app.discoveryManager.onScreenOn()
+                            // OmaID: periodic syncs pause while the screen is off; catch up once.
+                            app.account.onScreenOn()
+                        }
                     }
                 }
             }
@@ -50,6 +54,11 @@ class OmaSendForegroundService : Service() {
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
         } catch (_: Exception) {}
+
+        (applicationContext as? OmaSendApp)?.account?.let {
+            it.serviceRunning = true
+            it.requestSync()
+        }
 
         try {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -117,6 +126,7 @@ class OmaSendForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        (applicationContext as? OmaSendApp)?.account?.serviceRunning = false
         try {
             clipboardListener?.let {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

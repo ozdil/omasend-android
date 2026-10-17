@@ -78,6 +78,10 @@ object CoreNode {
     var lastStartError: String? = null
         private set
 
+    /** Whether the running node uses relays (internet path); only with an OmaID account. */
+    @Volatile
+    private var runningWan = false
+
     /**
      * Starts the node on [scope] (an IO scope): the core retries a busy port for several
      * seconds and the device key needs the Keystore, neither of which may run on the main
@@ -100,17 +104,21 @@ object CoreNode {
         _state.value = State.STARTING
         try {
             val dir = File(app.getExternalFilesDir(null) ?: app.filesDir, "incoming").apply { mkdirs() }
+            // Relays (internet path between account devices) only with an OmaID account; the
+            // relay URL is shared only inside the end-to-end encrypted account record.
+            val wan = app.account.hasAccount()
             node = OmaNode.start(
                 DeviceKey.seed(app),
                 NetworkUtils.getDeviceName(app),
                 dir.absolutePath,
                 QUIC_PORT.toUShort(),
-                false,
+                wan,
                 Callbacks(app)
             )
+            runningWan = wan
             lastStartError = null
             _state.value = State.RUNNING
-            Log.i(TAG, "core node started on UDP ${node?.boundPort()}")
+            Log.i(TAG, "core node started on UDP ${node?.boundPort()} (wan=$wan)")
         } catch (t: Throwable) {
             // Unpaired peers keep working over HTTP; paired devices report a clear error.
             // This includes DeviceKey.DeviceKeyUnavailableException: the stored key is kept.
@@ -118,6 +126,25 @@ object CoreNode {
             _state.value = State.FAILED
             Log.w(TAG, "core node unavailable: ${t.message}")
         }
+    }
+
+    /**
+     * Restarts a running node when an OmaID account was created, joined or left, so relays
+     * are on exactly when an account exists. Blocking (call on an IO thread); a no-op when the
+     * node is not running or already in the right mode. Running transfers are interrupted.
+     */
+    fun ensureWanMode(app: OmaSendApp) {
+        val want = app.account.hasAccount()
+        synchronized(this) {
+            val old = node ?: return
+            if (_state.value != State.RUNNING || runningWan == want) return
+            Log.i(TAG, "restarting core node (wan=$want)")
+            node = null
+            _state.value = State.IDLE
+            runCatching { old.shutdown() }
+            runCatching { old.destroy() }
+        }
+        start(app)
     }
 
     /** The running node, waiting up to [timeoutMs] while a start is in progress. */
@@ -168,7 +195,10 @@ object CoreNode {
         }
         if (!extraIp.isNullOrBlank()) ips += extraIp
         if (key.ip.isNotBlank()) ips += key.ip
-        return ips.map { "$it:$port" }
+        val out = LinkedHashSet(ips.map { "$it:$port" })
+        // OmaID account devices: their published LAN addresses and relay URL ("https://…").
+        app?.account?.dialHints(key.pk)?.let { out += it }
+        return out.toList()
     }
 
     private fun friendlyError(name: String, raw: String): String {

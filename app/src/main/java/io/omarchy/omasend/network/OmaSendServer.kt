@@ -358,8 +358,14 @@ class OmaSendServer(private val context: Context) {
                     handleAccountSync(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)
                 }
                 method == "POST" && (path == "/api/v2/link/start" || path == "/api/v2/link/finish") -> {
-                    // Linking is LAN-only (enforced above); visibility OFF was already refused above.
-                    handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
+                    if ((context.applicationContext as? io.omarchy.omasend.OmaSendApp)?.account?.hasAccount() == true) {
+                        // With an OmaID account, devices join through the account (approved once
+                        // after comparing a code); the legacy number-based link is switched off.
+                        sendResponse(output, 403, "Forbidden", "application/json", "{\"error\":\"This device uses an OmaID account; legacy linking is disabled\"}")
+                    } else {
+                        // Linking is LAN-only (enforced above); visibility OFF was already refused above.
+                        handleLink(path, input, output, contentLength, peerIp, remainingDeadline)
+                    }
                 }
                 method == "POST" && path == "/api/p2p/request" -> {
                     handleTransferRequest(input, output, headers, contentLength, peerIp, remainingDeadline, fullPath)

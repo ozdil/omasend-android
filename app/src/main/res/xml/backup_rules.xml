@@ -2,4 +2,7 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="." />
     <exclude domain="file" path="." />
+    <!-- Already covered above; listed so the OmaID account files stay excluded if the rules change. -->
+    <exclude domain="file" path="omaid_account.enc" />
+    <exclude domain="file" path="omaid_report.enc" />
 </full-backup-content>

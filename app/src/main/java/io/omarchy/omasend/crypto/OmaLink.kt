@@ -280,6 +280,20 @@ object OmaLink {
         newAccountId(context)
     }
 
+    /**
+     * Records keys revoked by the OmaID account (account/OmaAccount): dropped from the trust
+     * store and refused from then on. Unlike [revokeOwnDevice] the legacy number is kept: the
+     * account already rotated its own keys.
+     */
+    @Synchronized
+    fun markRevoked(context: Context, pks: Collection<String>) {
+        val list = revoked(context)
+        val add = pks.filter { it !in list }.distinct()
+        if (add.isNotEmpty()) saveRevoked(context, list + add)
+        val store = DeviceKey.TrustStore(context)
+        pks.forEach { store.remove(it) }
+    }
+
     fun rosterBody(me: DeviceKey.Identity, myName: String, myPort: Int, myQuic: Int, own: List<DeviceKey.TrustedKey>, revoked: List<String>): JsonObject {
         val devices = buildList {
             add(buildJsonObject { put("pk", me.publicB64); put("name", myName); put("port", myPort); put("quic_port", myQuic) })

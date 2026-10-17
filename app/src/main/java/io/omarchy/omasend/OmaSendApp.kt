@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import io.omarchy.omasend.account.OmaAccount
 import io.omarchy.omasend.audio.OmaSoundEngine
 import io.omarchy.omasend.crypto.OmaIdentity
 import io.omarchy.omasend.model.IncomingTransferPrompt
@@ -53,12 +54,18 @@ class OmaSendApp : Application() {
         private set
     lateinit var networkWatcher: NetworkConnectivityWatcher
         private set
+    /** OmaID account (one number for all of the user's devices). */
+    lateinit var account: OmaAccount
+        private set
 
     /** Incoming transfer requests waiting for a decision, oldest first. */
     private val _incomingPrompts = MutableStateFlow<List<IncomingTransferPrompt>>(emptyList())
     val incomingPrompts: StateFlow<List<IncomingTransferPrompt>> = _incomingPrompts.asStateFlow()
 
     @Volatile private var resumedActivities = 0
+
+    /** An activity of the app is resumed (on screen). */
+    val isInForeground: Boolean get() = resumedActivities > 0
 
     /** Removes a prompt once it was answered (or its request is gone) and clears its notification. */
     fun dismissPrompt(token: String) {
@@ -163,6 +170,9 @@ class OmaSendApp : Application() {
             start()
         }
 
+        // Before the core node: it starts with relays (wan) only when an account exists.
+        account = OmaAccount(this).also { it.start() }
+
         server.start()
         // Phase 2: encrypted QUIC transport for QR-paired devices. Started off the main thread:
         // the device key needs the Android Keystore and the core retries a busy UDP port for
@@ -214,9 +224,18 @@ class OmaSendApp : Application() {
                 enableVibration(true)
             }
 
+            val accountChannel = NotificationChannel(
+                CHANNEL_ACCOUNT,
+                OmaI18n.t("acct_channel"),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = OmaI18n.t("acct_channel_body")
+            }
+
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(serviceChannel)
             manager.createNotificationChannel(transferChannel)
+            manager.createNotificationChannel(accountChannel)
         }
     }
 
@@ -231,6 +250,7 @@ class OmaSendApp : Application() {
     companion object {
         const val CHANNEL_SERVICE = "omasend_service_channel"
         const val CHANNEL_TRANSFERS = "omasend_transfers_channel"
+        const val CHANNEL_ACCOUNT = "omasend_account_channel"
         const val NOTIFICATION_SERVICE_ID = 1001
         const val NOTIFICATION_RECEIVED_ID = 1002
 

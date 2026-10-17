@@ -3,6 +3,7 @@ package io.omarchy.omasend
 import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import io.omarchy.omasend.account.AccountLogic
+import io.omarchy.omasend.account.OmaAccount
 import io.omarchy.omasend.network.NetworkUtils
 import io.omarchy.omasend.service.OmaSendForegroundService
 import io.omarchy.omasend.ui.OmaI18n
@@ -39,6 +42,9 @@ class MainActivity : ComponentActivity() {
 
         // Request modern notifications and camera/storage permissions
         checkAndRequestPermissions()
+
+        // Deep link (https://omaid.app/j#…) or account notification; not again after rotation.
+        if (savedInstanceState == null) handleIntent(intent)
 
         // Start background service
         OmaSendForegroundService.startService(this)
@@ -85,11 +91,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    /**
+     * OmaID invite links open the account screen, which asks before joining (a link from a web
+     * page must not silently add this phone to someone else's account). The fragment (#n=…&k=…)
+     * carries the number and invite key and is kept: dataString includes it.
+     */
+    private fun handleIntent(intent: Intent?) {
+        val app = application as? OmaSendApp ?: return
+        if (intent == null) return
+        if (intent.getBooleanExtra(OmaAccount.EXTRA_OPEN_ACCOUNT, false)) {
+            app.account.requestOpen()
+        }
+        if (intent.action == Intent.ACTION_VIEW) {
+            val link = intent.dataString
+            if (link != null && AccountLogic.isInviteLink(link)) app.account.offerInvite(link)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         val app = application as? OmaSendApp
         app?.discoveryManager?.forceRefresh()
         app?.networkWatcher?.forceRefresh()
+        app?.account?.onForeground()
     }
 
     private fun checkAndRequestPermissions() {
